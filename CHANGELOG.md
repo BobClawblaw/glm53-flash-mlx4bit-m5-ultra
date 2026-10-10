@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-10
+
+- **A 262,144-token window by default, and the full 1,048,576 with `PROFILE=long`.** GLM's caches are small (8.9 GB at
+  262k, 24.2 GB at 1M, beside 180.6 GB of weights); the long profile raises `memory_limit_gb` to 215. At 1M the model
+  loads in 24 s, 202 GiB wired, about 27 GiB free. Needles found at 200,465, 484,568 and 926,599 prompt tokens
+  (810 / 551 / 366 tok/s), memory flat throughout (`evidence/2026-10-09-long-1m/`).
+- **Reasoning effort High by default** (`reasoning_effort`); GLM's template defaults to Max when none is sent.
+- **The suite with thinking on**: `python3 -m mac quality --thinking BUDGET` runs every check through
+  `tools/suite_thinking.py`, which turns thinking on in each request and adds the reasoning budget to its reply limit.
+
 ## 2026-10-09
 
 - **GLM-5.3-Flash MLX 4-bit on one 256 GB M5 Ultra, natively** on TensorFold v1.0.4 (`d4fc1964`) with

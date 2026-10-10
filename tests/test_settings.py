@@ -20,7 +20,7 @@ class Defaults(unittest.TestCase):
         s = load()
         self.assertEqual(s.profile, "chat")
         self.assertTrue(s.drafts)
-        self.assertEqual(s.context, 131072)
+        self.assertEqual(s.context, 262144)
         self.assertEqual(s.parallel, 1)
         self.assertEqual(s.url, "http://127.0.0.1:8888")  # not 8080: everything else on this Mac uses it
         args = s.serve_args("/m")
@@ -31,12 +31,22 @@ class Defaults(unittest.TestCase):
             self.assertNotIn(flag, args)
         self.assertEqual(args[args.index("--prompt-cache-gib") + 1], "4")
         self.assertEqual(args[args.index("--temperature") + 1], "0")        # the native GLM engine is greedy-only
+        self.assertEqual(args[args.index("--reasoning-effort") + 1], "high")
+        self.assertEqual(load(reasoning_effort="max").serve_args("/m")[-1:], load(reasoning_effort="max").serve_args("/m")[-1:])
+        self.assertIn("xhigh", load(reasoning_effort="max").serve_args("/m"))
+        self.assertNotIn("--reasoning-effort", load(reasoning_effort="").serve_args("/m"))
         self.assertEqual(s.server_env()["GLM_RESIDENCY"], "1")
         self.assertEqual(s.server_env()["GLM_WIRE"], "1")
         self.assertEqual(args[args.index("--vision-image-tokens") + 1], "4096")
         self.assertIn("--vision", args)
         self.assertNotIn("--vision", load(vision="0").serve_args("/m"))
         self.assertNotIn("GLM_RESIDENCY", load(residency="0").server_env())   # bounded, so the load stays predictable
+
+    def test_long_profile_is_the_full_window(self):
+        s = load(profile="long")
+        self.assertEqual((s.context, s.memory_limit_gb), (1048576, 215))
+        self.assertTrue(s.drafts)
+        self.assertEqual(load(profile="long", context="524288").context, 524288)  # an explicit context still wins
 
     def test_reference_profile_drops_drafts(self):
         s = load(profile="reference")
@@ -110,6 +120,8 @@ class Refusals(unittest.TestCase):
         self.refuse("decimal", temperature="hot")
         self.refuse("greedily", temperature="0.7")
         self.refuse("greedily", temperature="")
+        self.refuse("reasoning_effort", reasoning_effort="extreme")
+        self.refuse("passes itself", extra_args="--reasoning-effort low")
         self.refuse("vision_image_tokens", vision_image_tokens="8")
         self.refuse("vision-urls", extra_args="--vision-urls")
         self.refuse("passes", extra_args="--vision-max-images 2")

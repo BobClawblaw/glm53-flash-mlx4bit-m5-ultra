@@ -1,0 +1,3 @@
+nominal 250000: 200465 prompt tokens, depth 0.5, found=True, 248 s, prefill 810 tok/s
+nominal 600000: 484568 prompt tokens, depth 0.5, found=True, 880 s, prefill 551 tok/s
+nominal 1150000: 926599 prompt tokens, depth 0.5, found=True, 2533 s, prefill 366 tok/s

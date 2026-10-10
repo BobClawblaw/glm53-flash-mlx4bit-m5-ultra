@@ -14,14 +14,14 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILES = ("chat", "reference")
+PROFILES = ("chat", "reference", "long")
 MAX_CONTEXT = 1048576                # the checkpoint's max_position_embeddings
 # flags `serve_args` builds itself; EXTRA_ARGS may not set them (the parser keeps the last value); TensorFold's parser
 # takes unambiguous prefixes, so any prefix of these is refused too
 OWNED_FLAGS = ("--host", "--port", "--name", "--context", "--parallel", "--max-tokens", "--thinking", "--no-thinking",
                "--no-drafts", "--no-update-check", "--temperature", "--prompt-cache-gib", "--keep-warm", "--learn",
                "--learn-dir", "--learn-gib", "--compact-at", "--dashboard", "--api-key", "--vision", "--vision-image-tokens",
-               "--vision-max-images")
+               "--vision-max-images", "--reasoning-effort")
 # flags the native server has for other families or platforms; refused so a setting is not silently ignored
 UNUSED_FLAGS = ("--speed-up", "--backend", "--device", "--segments", "--kv-dtype", "--tp", "--rank", "--master",
                 "--master-port", "--vision-urls", "--vision-offload", "--tool-system")
@@ -59,6 +59,7 @@ class Settings:
     parallel: int
     drafts: bool
     thinking: bool
+    reasoning_effort: str
     max_tokens: int
     temperature: str
     prompt_cache_gib: int
@@ -147,6 +148,8 @@ class Settings:
                 "--thinking" if self.thinking else "--no-thinking", "--no-update-check"]
         if not self.drafts:
             args.append("--no-drafts")
+        if self.reasoning_effort:  # the server's choices; the template reads medium as high and xhigh as max
+            args += ["--reasoning-effort", {"max": "xhigh"}.get(self.reasoning_effort, self.reasoning_effort)]
         if self.temperature:
             args += ["--temperature", self.temperature]
         if self.prompt_cache_gib >= 0:
@@ -185,7 +188,7 @@ class Settings:
     def summary(self) -> str:
         bin_ = self.binary or f"build@{self.tensorfold_sha[:8]}+{self.patch_sha256[:8]}"
         return (f"profile={self.profile} ctx={self.context} parallel={self.parallel} drafts={int(self.drafts)} "
-                f"thinking={int(self.thinking)} temp={self.temperature or 'checkpoint'} prompt_cache={self.prompt_cache_gib} "
+                f"thinking={int(self.thinking)} effort={self.reasoning_effort or 'max'} temp={self.temperature or 'checkpoint'} prompt_cache={self.prompt_cache_gib} "
                 f"learn={int(self.learn)} vision={self.vision_image_tokens if self.vision else 0} limit={self.memory_limit_gb}GB "
                 f"residency={int(self.residency)} memguard={int(self.memguard)} engine={bin_} "
                 f"model={self.repo}@{self.revision[:8]} url={self.url}")
@@ -287,6 +290,9 @@ def validate(s: Settings) -> None:
     for repo in s.candidate_repos:
         if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repo):
             raise ConfigError(f"repository {repo!r} is not org/name")
+    if s.reasoning_effort not in ("", "low", "medium", "high", "xhigh", "max"):
+        raise ConfigError(f"reasoning_effort={s.reasoning_effort!r} must be low, high or max (medium, xhigh), or empty "
+                          "for the template's default (max)")
     if s.temperature and not re.fullmatch(r"[0-9]+(\.[0-9]+)?", s.temperature):
         raise ConfigError(f"temperature={s.temperature!r} must be a decimal such as 0 or 0.7, or empty for the checkpoint's")
     if not s.temperature or float(s.temperature) != 0:

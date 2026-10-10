@@ -28,10 +28,16 @@ def ensure_clone(s: Settings) -> None:
     log(f"Spark recipe at {s.spark_recipe_sha[:8]} under {d}")
 
 
-def suite(s: Settings, passthrough: list[str]) -> int:
-    """python3 -m quality.suite --url <ours> --model <ours> ...; HumanEval needs its Docker sandbox, skipped unless asked."""
+def suite(s: Settings, passthrough: list[str], thinking_budget: int = 0) -> int:
+    """python3 -m quality.suite --url <ours> --model <ours> ...; HumanEval needs its Docker sandbox, skipped unless asked.
+
+    `thinking_budget` > 0: through tools/suite_thinking.py, every request with thinking on and that much reasoning room.
+    """
     ensure_clone(s)
-    args = [sys.executable, "-m", "quality.suite", "--url", s.url, "--model", s.served_name]
+    if thinking_budget > 0:
+        args = [sys.executable, str(ROOT / "tools" / "suite_thinking.py"), str(thinking_budget), "--url", s.url, "--model", s.served_name]
+    else:
+        args = [sys.executable, "-m", "quality.suite", "--url", s.url, "--model", s.served_name]
     if "--only" not in passthrough and "--skip" not in passthrough:  # HumanEval's sandbox is a Docker image
         args += ["--skip", "humaneval"] + ([] if s.vision else ["vision"])
     if "--out" not in passthrough:
@@ -60,7 +66,7 @@ def ruler(s: Settings, passthrough: list[str]) -> int:
     return subprocess.run(args + passthrough, cwd=s.external_dir, env=_env()).returncode
 
 
-def quality(s: Settings, label: str, humaneval: bool = False) -> int:
+def quality(s: Settings, label: str, humaneval: bool = False, thinking_budget: int = 0) -> int:
     """The recipe's standard measurement: every suite check and the decode ruler into evidence/<date>-<label>/.
 
     Long-context documents up to `context` nominal tokens (the suite sizes them nominally; GLM's tokenizer makes them
@@ -73,7 +79,8 @@ def quality(s: Settings, label: str, humaneval: bool = False) -> int:
     skip = [] if humaneval and shutil.which("docker") else ["humaneval"]
     if not s.vision:
         skip.append("vision")
-    rc = suite(s, ["--long-max", str(s.context), "--out", str(out / "suite")] + (["--skip", *skip] if skip else []))
+    rc = suite(s, ["--long-max", str(s.context), "--out", str(out / "suite")] + (["--skip", *skip] if skip else []),
+               thinking_budget)
     (out / "ruler").mkdir(parents=True, exist_ok=True)
     rc2 = ruler(s, ["--runs", "3", "--max-tokens", "256", "--json", str(out / "ruler" / "ruler.json")])
     log(f"quality: {out / 'suite' / 'report.md'} and {out / 'ruler' / 'ruler.json'}")

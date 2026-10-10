@@ -38,10 +38,12 @@ request_log = ""                         # a file for TENSORFOLD_REQUEST_LOG; em
 
 [serve]
 profile = "chat"                 # chat (MTP drafts) | reference (--no-drafts, the exactness reference)
-# the window: GLM's engine default is 131,072 of the checkpoint's 1,048,576; the caches grow with it (6.3 GB at 131k)
-context = 131072
+# the window, of the checkpoint's 1,048,576. GLM's caches are small: 8.9 GB at 262,144, 24.2 GB at 1,048,576
+# (PROFILE=long), beside 180.6 GB of weights
+context = 262144
 parallel = 1                     # streams admitted at once (shared lanes); 1 is one reply at a time
 drafts = true
+reasoning_effort = "high"        # GLM-5.3's levels: low, high, max; "" leaves the template's default, max
 thinking = true                  # GLM-5.3 reasons first (reasoning_content); a request can send chat_template_kwargs {"enable_thinking": false}
 max_tokens = 32768
 temperature = "0"                # the native GLM engine decodes greedily only: a request at the checkpoint's 1.0 is refused
@@ -78,6 +80,10 @@ drafts = true
 
 [profiles.reference]
 drafts = false
+
+[profiles.long]                   # the full 1,048,576-token window: 204.8 GB of weights and caches, ~20 GiB left free
+context = 1048576
+memory_limit_gb = 215
 
 # The Spark recipe's quality suite and decode ruler run against any OpenAI-compatible URL. `python3 -m mac suite|ruler`
 # clones it at this commit under .external/ (git-ignored) and runs them there; nothing of it is copied into this tree.

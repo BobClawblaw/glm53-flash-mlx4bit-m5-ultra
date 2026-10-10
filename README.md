@@ -6,8 +6,9 @@ checkpoint is Z.AI's GLM-5.3-Flash: 45 layers of Kimi delta attention and sparse
 4-bit weights in groups of 64, an MTP head, and the vision tower.
 
 You get:
-- a 131,072-token window and MTP drafts;
-- reasoning on by default;
+- a 262,144-token window by default, and the full 1,048,576 with `PROFILE=long`;
+- MTP drafts;
+- reasoning on by default, at effort High;
 - image input, run natively: the tower on Metal, decoding and preprocessing in the engine;
 - tool calls;
 - an OpenAI-compatible API on port 8888;
@@ -42,7 +43,7 @@ pinned commit and run against this server. Every number below has a file under [
 
 ## Measured on this Mac
 
-The defaults: one stream, a 131,072-token window, MTP drafts, vision on, model wired. These were measured with
+The defaults: one stream, MTP drafts, vision on, model wired, measured on 131,072 and 1,048,576-token windows (decode does not change with the window). These were measured with
 `bench/ruler.py`: greedy, thinking off, 256-token replies, a distinct prompt per phase, median of 3 runs. Receipts:
 [`evidence/2026-10-09-ruler-1.0.4/`](evidence/2026-10-09-ruler-1.0.4/).
 
@@ -53,9 +54,11 @@ The defaults: one stream, a 131,072-token window, MTP drafts, vision on, model w
 Tokens a second. Undrafted, one stream decodes at 63 tok/s and drafted at 81, on the suite's `drafts` prompts. The
 recipe serves one stream (`parallel = 1`): it gives up concurrency for the memory headroom of one 256 GB Mac.
 
-Prompt passes, one prompt each, prompt cache off, with the needle found in every one. These come from the
-long-context check's own timings,
-[`evidence/2026-10-09-quality-1.0.4-long128/`](evidence/2026-10-09-quality-1.0.4-long128/):
+Prompt passes, one prompt each, prompt cache off, with the needle found in every one. Up to 102k they come from the
+long-context check's own timings
+([`evidence/2026-10-09-quality-1.0.4-long128/`](evidence/2026-10-09-quality-1.0.4-long128/)); beyond that, from the
+suite's needle function on the 1,048,576-token profile
+([`evidence/2026-10-09-long-1m/`](evidence/2026-10-09-long-1m/)):
 
 | Prompt | Time to first token | Rate |
 |---:|---:|---:|
@@ -63,6 +66,9 @@ long-context check's own timings,
 | 25,435 | 22.4 s | 1,134 tok/s |
 | 50,981 | 48.6 s | 1,049 tok/s |
 | 102,081 | 111.2 s | 918 tok/s |
+| 200,465 | 248 s | 810 tok/s |
+| 484,568 | 880 s | 551 tok/s |
+| 926,599 | 2,533 s | 366 tok/s |
 
 Images ([`evidence/2026-10-09-native-vision-1.0.3.md`](evidence/2026-10-09-native-vision-1.0.3.md)):
 
@@ -73,10 +79,17 @@ Images ([`evidence/2026-10-09-native-vision-1.0.3.md`](evidence/2026-10-09-nativ
 | 2000x1500 photo-like, 1,024-token budget | 972 | 43 ms | 154 ms | |
 | 2000x1500, the full 4,096-token budget | 3,909 prompt tokens | | | 6.4 s |
 
-Memory, with the model and tower wired:
-- the load takes 21.7 s from a warm disk (80 s unwired);
-- 183 GiB wired, about 38 GiB free, compressor and pressure flat;
-- the tower is 0.9 GiB, plus 1.2 GiB of scratch for 4,096 image tokens.
+Memory, with the model and tower wired. GLM's caches are small: most of its layers keep constant-size state.
+
+| window | caches | weights + caches | wired | free after load |
+|---:|---:|---:|---:|---:|
+| 131,072 | 6.3 GB | 186.9 GB | 183 GiB | ~38 GiB |
+| 262,144 (default) | 8.9 GB | 189.5 GB | | |
+| 524,288 | 14.0 GB | 194.6 GB | | |
+| 1,048,576 (`PROFILE=long`) | 24.2 GB | 204.8 GB | 202 GiB | ~27 GiB |
+
+The load takes 21.7-24 s from a warm disk (80 s unwired), with the compressor and pressure flat. Memory stayed flat
+through the 485k-token prompt pass. The tower is 0.9 GiB, plus 1.2 GiB of scratch for 4,096 image tokens.
 
 ## Quality
 
@@ -149,6 +162,7 @@ python3 -m mac up                         # build the patched engine, download, 
 python3 -m mac status                     # pid, memory, /health, /v1/models, stats
 python3 -m mac chat "Say hello."          # one greedy text reply
 python3 -m mac see tests/images/shapes.png --prompt "What shapes and colours are in this image?"
+PROFILE=long python3 -m mac up            # the full 1,048,576-token window
 python3 -m mac quality --label my-run     # the full suite and the ruler into evidence/<date>-my-run/
 python3 -m mac down
 ```
@@ -196,10 +210,11 @@ an environment variable of the same name in upper case (`PORT=8890 python3 -m ma
 | Setting | Default | Notes |
 |---|---|---|
 | `host`, `port` | `127.0.0.1`, `8888` | `0.0.0.0` serves the network |
-| `profile` | `chat` | `chat`: MTP drafts; `reference`: `--no-drafts`, the exactness reference |
-| `context` | 131072 | the engine's GLM default, of the checkpoint's 1,048,576. The caches grow with it (6.3 GB at 131k) |
+| `profile` | `chat` | `chat`: MTP drafts; `long`: the full 1,048,576-token window (and `memory_limit_gb` 215); `reference`: `--no-drafts`, the exactness reference |
+| `context` | 262144 | of the checkpoint's 1,048,576. The caches grow slowly with it (see Memory) |
 | `parallel` | 1 | streams at once. More streams cost cache memory this Mac lacks beside 185 GiB of model |
 | `thinking` | true | reasoning first, in `reasoning_content`. A request sends `chat_template_kwargs: {"enable_thinking": false}` to skip it |
+| `reasoning_effort` | `high` | GLM-5.3's levels are `low`, `high` and `max`. A request's `"reasoning_effort"` overrides it; empty leaves the template's default, `max` |
 | `temperature` | `"0"` | greedy is all the native GLM engine decodes. Requests with a temperature are served greedily |
 | `max_tokens` | 32768 | the reply cap when a request sets none. With thinking on, reasoning counts against it |
 | `prompt_cache_gib` | 4 | kept prompt states, bounded so the load stays predictable |

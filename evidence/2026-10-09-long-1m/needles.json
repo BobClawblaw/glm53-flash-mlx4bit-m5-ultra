@@ -1,0 +1,26 @@
+[
+ {
+  "tokens": 200465,
+  "depth": 0.5,
+  "found": true,
+  "seconds": 247.53144162509125,
+  "prefill_tok_s": 809.8567142982279,
+  "reply": "7-4-3-3-5"
+ },
+ {
+  "tokens": 484568,
+  "depth": 0.5,
+  "found": true,
+  "seconds": 879.7994946249528,
+  "prefill_tok_s": 550.7709460626197,
+  "reply": "7-4-3-3-5"
+ },
+ {
+  "tokens": 926599,
+  "depth": 0.5,
+  "found": true,
+  "seconds": 2533.3868941670517,
+  "prefill_tok_s": 365.75503020617583,
+  "reply": "7-4-3-3-5"
+ }
+]
