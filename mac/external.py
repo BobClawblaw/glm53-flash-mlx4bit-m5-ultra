@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+import time
 
 from .config import ROOT, Settings
 from .log import log
@@ -56,3 +58,23 @@ def ruler(s: Settings, passthrough: list[str]) -> int:
     if "--concurrency" not in passthrough:
         args += ["--concurrency", "1"]
     return subprocess.run(args + passthrough, cwd=s.external_dir, env=_env()).returncode
+
+
+def quality(s: Settings, label: str, humaneval: bool = False) -> int:
+    """The recipe's standard measurement: every suite check and the decode ruler into evidence/<date>-<label>/.
+
+    Long-context documents up to `context` nominal tokens (the suite sizes them nominally; GLM's tokenizer makes them
+    ~20% shorter, so 128k runs in a 131k window); HumanEval only with its Docker sandbox; vision only with vision on.
+    """
+    out = ROOT / "evidence" / f"{time.strftime('%Y-%m-%d')}-{label}"
+    if out.exists():
+        log(f"{out} exists: pick another --label")
+        return 2
+    skip = [] if humaneval and shutil.which("docker") else ["humaneval"]
+    if not s.vision:
+        skip.append("vision")
+    rc = suite(s, ["--long-max", str(s.context), "--out", str(out / "suite")] + (["--skip", *skip] if skip else []))
+    (out / "ruler").mkdir(parents=True, exist_ok=True)
+    rc2 = ruler(s, ["--runs", "3", "--max-tokens", "256", "--json", str(out / "ruler" / "ruler.json")])
+    log(f"quality: {out / 'suite' / 'report.md'} and {out / 'ruler' / 'ruler.json'}")
+    return rc or rc2

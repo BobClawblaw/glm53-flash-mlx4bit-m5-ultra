@@ -12,7 +12,7 @@ committed yet.
   - Defaults: port 8888, thinking on.
   - Engine on v1.0.4: 119/119 build steps, 773/775 tests, golden suite unchanged.
   - Vision checked against mlx-vlm (`evidence/2026-10-09-native-vision-1.0.3.md`).
-  - Quality suite and decode ruler complete (`evidence/2026-10-09-quality.md`). The user's hermes agent works
+  - Quality suite and decode ruler complete (`evidence/2026-10-09-quality.md`); `python3 -m mac quality` reruns both. The user's hermes agent works
     against it (33 requests, all 200).
   - Publishing files: NOTICE, LICENSES/Apache-2.0.txt, CHANGELOG.md, `.github/workflows/ci.yml`.
 - Open:
@@ -27,6 +27,14 @@ committed yet.
   - IFEval is weak with thinking off (65%): it is the model, not the serving.
   - The image-aware prompt-cache key is not exercised live.
 - The server may be up on 0.0.0.0:8888 (`local.toml`, git-ignored, also turns on the request log).
+
+## Measure before you claim
+
+Every recipe ships the quality suite and the decode ruler, and the README carries both, as detailed as the Qwen3.8
+Spark recipe's: a measured decode table, a prompt-pass table, the quality table with what each check measures, and
+the suite how-to. After any engine, patch or settings change, run `python3 -m mac quality --label <what changed>`.
+Commit the folder it writes under `evidence/`, then update the README tables from it. A number with no file under
+`evidence/` stays out of the README.
 
 ## Rules learned the hard way
 
