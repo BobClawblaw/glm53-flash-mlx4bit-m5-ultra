@@ -7,6 +7,9 @@
   loads in 24 s, 202 GiB wired, about 27 GiB free. Needles found at 200,465, 484,568 and 926,599 prompt tokens
   (810 / 551 / 366 tok/s), memory flat throughout (`evidence/2026-10-09-long-1m/`).
 - **Reasoning effort High by default** (`reasoning_effort`); GLM's template defaults to Max when none is sent.
+- **Quality with thinking on** (effort High, up to 32,768 reasoning tokens): IFEval 127/150 (98 off), GSM8K 248/250,
+  MMLU 307/342 (288 off), MGSM 221/240, tools 58/60, long context 54/55 to 200k tokens; the one miss, a 200k needle at
+  98% depth, is found with thinking off.
 - **The suite with thinking on**: `python3 -m mac quality --thinking BUDGET` runs every check through
   `tools/suite_thinking.py`, which turns thinking on in each request and adds the reasoning budget to its reply limit.
 

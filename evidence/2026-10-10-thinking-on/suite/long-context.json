@@ -1,0 +1,168 @@
+{
+ "name": "long-context",
+ "score": 0.9818181818181818,
+ "cases": 55,
+ "passed": 54,
+ "seconds": 2209.2346370220184,
+ "notes": [
+  "needles 14/15 to 200k (missed 200k@0.98), facts 10/10@25k, 10/10@51k, 10/10@102k, 10/10@200k, slowest prefill 431 tok/s"
+ ],
+ "details": {
+  "needles": [
+   {
+    "tokens": 6389,
+    "depth": 0.1,
+    "found": true,
+    "seconds": 6.126580124953762,
+    "prefill_tok_s": 1042.8330111896184,
+    "reply": "74335"
+   },
+   {
+    "tokens": 6391,
+    "depth": 0.5,
+    "found": true,
+    "seconds": 6.036268500029109,
+    "prefill_tok_s": 1058.7666867319074,
+    "reply": "74335"
+   },
+   {
+    "tokens": 6417,
+    "depth": 0.9,
+    "found": true,
+    "seconds": 5.827302874997258,
+    "prefill_tok_s": 1101.1955509525526,
+    "reply": "74335"
+   },
+   {
+    "tokens": 25434,
+    "depth": 0.1,
+    "found": true,
+    "seconds": 23.06906720797997,
+    "prefill_tok_s": 1102.5153193537865,
+    "reply": "74335"
+   },
+   {
+    "tokens": 25449,
+    "depth": 0.5,
+    "found": true,
+    "seconds": 23.010009875055403,
+    "prefill_tok_s": 1105.996917784405,
+    "reply": "74335"
+   },
+   {
+    "tokens": 25465,
+    "depth": 0.9,
+    "found": true,
+    "seconds": 23.13858866598457,
+    "prefill_tok_s": 1100.5424906245655,
+    "reply": "74335"
+   },
+   {
+    "tokens": 50980,
+    "depth": 0.1,
+    "found": true,
+    "seconds": 51.62442516593728,
+    "prefill_tok_s": 987.5170490738465,
+    "reply": "74335"
+   },
+   {
+    "tokens": 51053,
+    "depth": 0.5,
+    "found": true,
+    "seconds": 52.818256583064795,
+    "prefill_tok_s": 966.5786662176428,
+    "reply": "74335"
+   },
+   {
+    "tokens": 51003,
+    "depth": 0.9,
+    "found": true,
+    "seconds": 50.96937441593036,
+    "prefill_tok_s": 1000.6597213415891,
+    "reply": "74335"
+   },
+   {
+    "tokens": 102080,
+    "depth": 0.02,
+    "found": true,
+    "seconds": 113.91759091708809,
+    "prefill_tok_s": 896.0863653998462,
+    "reply": "74335"
+   },
+   {
+    "tokens": 102122,
+    "depth": 0.5,
+    "found": true,
+    "seconds": 111.06079779192805,
+    "prefill_tok_s": 919.5143743819052,
+    "reply": "74335"
+   },
+   {
+    "tokens": 102085,
+    "depth": 0.98,
+    "found": true,
+    "seconds": 114.86167116707657,
+    "prefill_tok_s": 888.7647111760044,
+    "reply": "74335"
+   },
+   {
+    "tokens": 200365,
+    "depth": 0.02,
+    "found": true,
+    "seconds": 252.65356458292808,
+    "prefill_tok_s": 793.0424426457458,
+    "reply": "7-4-3-3-5"
+   },
+   {
+    "tokens": 200464,
+    "depth": 0.5,
+    "found": true,
+    "seconds": 462.87399745802395,
+    "prefill_tok_s": 433.08546408070634,
+    "reply": "7-4-3-3-5"
+   },
+   {
+    "tokens": 200415,
+    "depth": 0.98,
+    "found": false,
+    "seconds": 465.2518587920349,
+    "prefill_tok_s": 430.7666830614092,
+    "reply": "The document does not contain any information about a secret"
+   }
+  ],
+  "facts": [
+   {
+    "tokens": 25561,
+    "recalled": 10,
+    "of": 10,
+    "seconds": 31.057977915974334,
+    "prefill_tok_s": 823.0091498279087,
+    "reply": "Avery: 563\nBlake: 986\nCasey: 673\nDevin: 977\nEmery: 899\nFinley: 576\nHarper: 562\nJordan: 620\nKendall: 975\nMorgan: 701"
+   },
+   {
+    "tokens": 51108,
+    "recalled": 10,
+    "of": 10,
+    "seconds": 51.5286904159002,
+    "prefill_tok_s": 991.8358022976189,
+    "reply": "Avery: 563\nBlake: 986\nCasey: 673\nDevin: 977\nEmery: 899\nFinley: 576\nHarper: 562\nJordan: 620\nKendall: 975\nMorgan: 701"
+   },
+   {
+    "tokens": 102248,
+    "recalled": 10,
+    "of": 10,
+    "seconds": 110.39211070898455,
+    "prefill_tok_s": 926.2256092697237,
+    "reply": "Avery: 563\nBlake: 986\nCasey: 673\nDevin: 977\nEmery: 899\nFinley: 576\nHarper: 562\nJordan: 620\nKendall: 975\nMorgan: 701"
+   },
+   {
+    "tokens": 200650,
+    "recalled": 10,
+    "of": 10,
+    "seconds": 252.9829157500062,
+    "prefill_tok_s": 793.1365618312313,
+    "reply": "Avery: 563\nBlake: 986\nCasey: 673\nDevin: 977\nEmery: 899\nFinley: 576\nHarper: 562\nJordan: 620\nKendall: 975\nMorgan: 701"
+   }
+  ]
+ }
+}

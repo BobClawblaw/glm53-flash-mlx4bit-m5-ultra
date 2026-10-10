@@ -93,34 +93,45 @@ through the 485k-token prompt pass. The tower is 0.9 GiB, plus 1.2 GiB of scratc
 
 ## Quality
 
-The Spark recipe's suite on the defaults, greedy, with thinking **off** (the suite sends it). Datasets are pinned. Receipts: [`evidence/2026-10-09-quality.md`](evidence/2026-10-09-quality.md)
-and the folders beside it.
+The Spark recipe's suite on the defaults, greedy, datasets pinned. Each check ran twice: with thinking **on** at effort
+High (the recipe's default; `python3 -m mac quality --thinking 32768`, up to 32,768 reasoning tokens a request) and
+with thinking **off** (as the suite sends on its own). Receipts:
+[`evidence/2026-10-10-thinking-on/`](evidence/2026-10-10-thinking-on/) and
+[`evidence/2026-10-09-quality.md`](evidence/2026-10-09-quality.md).
 
-| Check | Result |
-|---|---|
-| drafted equals undrafted; four streams together equal alone | 12/12; 12/12 (queued, `parallel = 1`) |
-| streaming = non-streaming, multi-turn recall, stop strings, thinking mode, verbatim copy, exact `max_tokens` | all pass |
-| tool calls (60: exact function and arguments, optional arguments left out, parallel calls, no-call cases) | 57/60 |
-| JSON schemas | 30/30 |
-| IFEval (150 prompts, the 24 instruction types implemented) | 98 loose / 92 strict |
-| GSM8K (250) | 245 (98.0%) |
-| MGSM (8 languages x 30) | 220 (91.7%) |
-| MMLU (6 a subject, 342) | 288 (84.2%) |
-| HumanEval (164, pass@1, sandboxed) | not run (needs the suite's Docker sandbox) |
-| repetition (eight 600-word replies) | 8/8, 0.06% repeated 4-grams |
-| long context: needles at 10/50/90% of 6-51k and 2/50/98% of 102k; ten spread facts at 25k, 51k and 102k | 42/42 |
-| vision (12 drawn probes) | 12/12 |
+| Check | Thinking on (default) | Thinking off |
+|---|---|---|
+| drafted equals undrafted; four streams together equal alone | 12/12; 12/12 | 12/12; 12/12 |
+| streaming = non-streaming, multi-turn recall, stop strings, thinking mode, verbatim copy | all pass | all pass |
+| exact `max_tokens` | 0/3 (see below) | 3/3 |
+| tool calls (60: exact function and arguments, optional arguments left out, parallel calls, no-call cases) | 58/60 | 57/60 |
+| JSON schemas | 30/30 | 30/30 |
+| IFEval (150 prompts, the 24 instruction types implemented) | 127 loose / 117 strict | 98 / 92 |
+| GSM8K (250) | 248 (99.2%) | 245 (98.0%) |
+| MGSM (8 languages x 30) | 221 (92.1%) | 220 (91.7%) |
+| MMLU (6 a subject, 342) | 307 (89.8%) | 288 (84.2%) |
+| HumanEval (164, pass@1, sandboxed) | not run (needs the suite's Docker sandbox) | not run |
+| repetition (eight 600-word replies) | 8/8, 0.18% repeated 4-grams | 8/8, 0.06% |
+| long context: needles at 10/50/90% of 6-51k and 2/50/98% of 102k and 200k; ten spread facts at 25k-200k | 54/55 (to 200k, 262k window) | 42/42 (to 102k, 131k window) |
+| vision (12 drawn probes) | 12/12 | 12/12 |
 
 Notes on the results:
 
-- **Tools.** The three misses are the checker's exact match. Each picked the right function with the right core
+- **Thinking pays where it should.** IFEval rises from 98 to 127, MMLU from 288 to 307, GSM8K from 245 to 248. The
+  replies with thinking off were well formed but broke the instruction; with reasoning the model checks itself.
+- **Exact `max_tokens`** fails with thinking on because of how the run is set up, not the server. To leave room for
+  reasoning, the wrapper adds the 32,768-token budget to every reply limit, so the model finishes well under the
+  raised limit. The thinking-off run (3/3) is the test of the limit.
+- **Long context.** The one miss is a 200k-token document with the needle 98% of the way in. With thinking on, the
+  model answered that the document held no secret. With thinking off, the same document gave the code at 98% and 95%
+  depth ([`needle-200k-098-thinking-off.txt`](evidence/2026-10-10-thinking-on/needle-200k-098-thinking-off.txt)).
+  For plain retrieval from a long document, send `"chat_template_kwargs": {"enable_thinking": false}`. The suite
+  sizes documents nominally (8k-250k) and GLM's tokenizer makes them about 20% shorter, so "250k" is about 200k
+  tokens. Beyond the suite, needles were found at 485k and 927k tokens on the 1M profile (see Measured).
+- **Tools.** The misses are the checker's exact match. The model picked the right function with the right core
   values, then added an optional field (`label` on a timer) or a fuller place name ("louvre museum, paris").
-- **IFEval** is where GLM-5.3-Flash is weaker with thinking off. The replies are complete and well formed; the model
-  breaks the rule ("no commas", "only JSON", "exactly 2 paragraphs", lowercase hashtags). With thinking on, 6 of the
-  first 10 misses passed, at 4,000-25,000 characters of reasoning each. That's why the recipe defaults to thinking
-  on.
-- **Long context** stops at 102k real tokens. The suite sizes documents nominally (8k-250k). GLM's tokenizer makes
-  them about 20% shorter, so the "128k" level fits the 131,072 window and "250k" does not.
+- **Decode is the same either way.** The ruler on the thinking-on defaults (262k window, effort High) measured
+  92.9 / 106.0 / 104.0 / 90.1 tok/s.
 - **Serving checks beyond the suite.** Tool calls with `temperature` 0.6 (as agents send), thinking off and on,
   streamed and not, all returned valid `tool_calls`. Parallel calls with a `tool`-result round trip answered
   correctly. An agent (hermes) on another machine sent 33 requests, all 200.

@@ -1,0 +1,12 @@
+{
+ "name": "tools",
+ "score": 0.9666666666666667,
+ "cases": 60,
+ "passed": 58,
+ "seconds": 106.1052770614624,
+ "notes": [
+  "'Set a timer for 5 minutes.': got [('set_timer', {'label': '5 minutes', 'seconds': 300})]",
+  "'Walking directions from the Louvre to No': got [('get_directions', {'destination': 'notre-dame de paris', 'mode': 'walking', 'origin': 'louvre, paris'})]"
+ ],
+ "details": {}
+}

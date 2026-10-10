@@ -1,0 +1,20 @@
+| Check | Passed | Score | Time | Note |
+|---|---:|---:|---:|---|
+| drafts | 12/12 | 100.0% | 78s | drafted 79 tok/s vs undrafted 60 tok/s |
+| concurrent | 12/12 | 100.0% | 63s | 4 streams together vs alone |
+| streaming | 4/4 | 100.0% | 17s | identical |
+| multiturn | 8/8 | 100.0% | 14s | recalled 8/8 facts |
+| stop | 3/3 | 100.0% | 1s | 3/3 stopped before the string |
+| thinking | 10/10 | 100.0% | 10s | 0 replies without reasoning_content, 0 with think tags in content |
+| copy | 2/2 | 100.0% | 2s | 2/2 byte-identical |
+| max-tokens | 0/3 | 0.0% | 114s | 0/3 exact |
+| tools | 58/60 | 96.7% | 106s | 'Set a timer for 5 minutes.': got [('set_timer', {'label': '5 minutes', 'seconds': 300})] |
+| json | 30/30 | 100.0% | 26s | all valid |
+| ifeval | 127/150 | 84.7% | 1333s | loose 127/150, strict 117/150, 150 covered prompts |
+| gsm8k | 248/250 | 99.2% | 415s | misses at [12, 119] |
+| mgsm | 221/240 | 92.1% | 644s | de 28/30, es 27/30, fr 26/30, ja 28/30, zh 29/30, ru 29/30, sw 28/30, bn 26/30 |
+| mmlu | 307/342 | 89.8% | 816s | 57 subjects x 6; weakest business_ethics 3/6, virology 3/6, college_chemistry 4/6 |
+| repetition | 8/8 | 100.0% | 86s | repeated 4-grams 0.18% mean, max 0.65%; 0 replies hit max_tokens |
+| long-context | 54/55 | 98.2% | 2209s | needles 14/15 to 200k (missed 200k@0.98), facts 10/10@25k, 10/10@51k, 10/10@102k, 10/10@200k, slowest prefill 431 tok/s |
+| vision | 12/12 | 100.0% | 9s | all probes answered |
+| snapshot | 12/12 | 100.0% | 29s | replies written to evidence/2026-10-10-thinking-on/suite/replies.json |

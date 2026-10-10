@@ -1,0 +1,2 @@
+thinking off: 200416 tokens, depth 0.98, found=True, 250 s, reply='7-4-3-3-5'
+thinking off: 200497 tokens, depth 0.95, found=True, 252 s, reply='7-4-3-3-5'
