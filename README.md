@@ -80,26 +80,25 @@ Memory, with the model and tower wired:
 
 ## Quality
 
-The Spark recipe's suite on the defaults, greedy, with thinking **off** (the suite sends it) to match the Qwen3.8
-recipe's table. Datasets are pinned. Receipts: [`evidence/2026-10-09-quality.md`](evidence/2026-10-09-quality.md)
+The Spark recipe's suite on the defaults, greedy, with thinking **off** (the suite sends it). Datasets are pinned. Receipts: [`evidence/2026-10-09-quality.md`](evidence/2026-10-09-quality.md)
 and the folders beside it.
 
-| Check | GLM-5.3-Flash, one M5 Ultra | Qwen3.8 Flash Next, 2x DGX Spark |
-|---|---|---|
-| drafted equals undrafted; four streams together equal alone | 12/12; 12/12 (queued, `parallel = 1`) | 12/12; 12/12 |
-| streaming = non-streaming, multi-turn recall, stop strings, thinking mode, verbatim copy, exact `max_tokens` | all pass | all pass |
-| tool calls (60: exact function and arguments, optional arguments left out, parallel calls, no-call cases) | 57/60 | 60/60 |
-| JSON schemas | 30/30 | 30/30 |
-| IFEval (150 prompts, the 24 instruction types implemented) | 98 loose / 92 strict | 130 / 125 |
-| GSM8K (250) | 245 (98.0%) | 241 (96.4%) |
-| MGSM (8 languages x 30) | 220 (91.7%) | 219 (91.3%) |
-| MMLU (6 a subject, 342) | 288 (84.2%) | 283 (82.7%) |
-| HumanEval (164, pass@1, sandboxed) | not run (needs the suite's Docker sandbox) | 157 (95.7%) |
-| repetition (eight 600-word replies) | 8/8, 0.06% repeated 4-grams | 8/8, 0.40% |
-| long context: needles at 10/50/90% of 6-51k and 2/50/98% of 102k; ten spread facts at 25k, 51k and 102k | 42/42 | 55/55 (to 225k) |
-| vision (12 drawn probes) | 12/12 | 12/12 |
+| Check | Result |
+|---|---|
+| drafted equals undrafted; four streams together equal alone | 12/12; 12/12 (queued, `parallel = 1`) |
+| streaming = non-streaming, multi-turn recall, stop strings, thinking mode, verbatim copy, exact `max_tokens` | all pass |
+| tool calls (60: exact function and arguments, optional arguments left out, parallel calls, no-call cases) | 57/60 |
+| JSON schemas | 30/30 |
+| IFEval (150 prompts, the 24 instruction types implemented) | 98 loose / 92 strict |
+| GSM8K (250) | 245 (98.0%) |
+| MGSM (8 languages x 30) | 220 (91.7%) |
+| MMLU (6 a subject, 342) | 288 (84.2%) |
+| HumanEval (164, pass@1, sandboxed) | not run (needs the suite's Docker sandbox) |
+| repetition (eight 600-word replies) | 8/8, 0.06% repeated 4-grams |
+| long context: needles at 10/50/90% of 6-51k and 2/50/98% of 102k; ten spread facts at 25k, 51k and 102k | 42/42 |
+| vision (12 drawn probes) | 12/12 |
 
-Reading the differences:
+Notes on the results:
 
 - **Tools.** The three misses are the checker's exact match. Each picked the right function with the right core
   values, then added an optional field (`label` on a timer) or a fuller place name ("louvre museum, paris").

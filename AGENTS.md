@@ -31,7 +31,7 @@ committed yet.
 ## Measure before you claim
 
 Every recipe ships the quality suite and the decode ruler, and the README carries both, as detailed as the Qwen3.8
-Spark recipe's: a measured decode table, a prompt-pass table, the quality table with what each check measures, and
+Spark recipe's (its structure, not its numbers: a recipe reports only its own model): a measured decode table, a prompt-pass table, the quality table with what each check measures, and
 the suite how-to. After any engine, patch or settings change, run `python3 -m mac quality --label <what changed>`.
 Commit the folder it writes under `evidence/`, then update the README tables from it. A number with no file under
 `evidence/` stays out of the README.
