@@ -9,22 +9,21 @@ committed yet.
 - Done:
   - Native `--vision` (tower, preprocessing, server), wired loading, memguard, greedy fallback for clients that send
     a temperature.
-  - Defaults: port 8888, thinking on.
+  - Defaults: port 8888, a 262,144-token window (`PROFILE=long`: the full 1,048,576, needles found to 927k tokens),
+    thinking on at effort High.
   - Engine on v1.0.4: 119/119 build steps, 773/775 tests, golden suite unchanged.
   - Vision checked against mlx-vlm (`evidence/2026-10-09-native-vision-1.0.3.md`).
-  - Quality suite and decode ruler complete (`evidence/2026-10-09-quality.md`); `python3 -m mac quality` reruns both. The user's hermes agent works
+  - Quality suite and decode ruler complete, thinking on (`evidence/2026-10-10-thinking-on/`) and off
+    (`evidence/2026-10-09-quality.md`); `python3 -m mac quality [--thinking 32768]` reruns them. The user's hermes agent works
     against it (33 requests, all 200).
   - Publishing files: NOTICE, LICENSES/Apache-2.0.txt, CHANGELOG.md, `.github/workflows/ci.yml`.
 - Open:
-  - Not committed and no GitHub remote: the user decides whether and where to publish.
-  - Possible upstream contributions, none posted yet (the user picks; post as BobClawblaw, strip paths and names):
-    - ashhart/TensorFold #498: the GLM one-Mac load limit, with the wiring the higher limit needs.
-    - #565 (ours): native image input; a comment with the GLM Metal tower and its interface comes first.
-    - Greedy-only engines fail a sampled request with a 500 after the whole prefill.
-    - The loader leaves checkpoint pages cached by an earlier download.
-    - The prompt cache keeps no single-chunk prompt.
+  - Published: https://github.com/BobClawblaw/glm53-flash-mlx4bit-m5-ultra (public).
+  - Upstream contributions (as BobClawblaw, paths and names stripped); follow up on review:
+    - Posted 2026-10-10: PRs ashhart/TensorFold#580 (load limit), #581 (wiring), #582 (greedy refusal);
+      a #565 comment (GLM Metal vision); issues #583 (loader page cache), #584 (prompt-cache question).
   - `response_format` returns 400: the native engine has no structured output.
-  - IFEval is weak with thinking off (65%): it is the model, not the serving.
+  - With thinking on, one 200k needle at 98% depth was missed; thinking off finds it (retrieval: send thinking off).
   - The image-aware prompt-cache key is not exercised live.
 - The server may be up on 0.0.0.0:8888 (`local.toml`, git-ignored, also turns on the request log).
 
