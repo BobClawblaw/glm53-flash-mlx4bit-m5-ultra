@@ -1,0 +1,7 @@
+# glm-one-mac-vision-pool-wiredreads-v1.0.5.patch, 2026-10-10: the load that stalled, then the fix
+# before the fix (same binary otherwise): 5 min after start, still after 'glm plan', 200 GiB wired, 4.0 GiB free pages, 23 GiB file-backed
+# with the fix, before the load: 198.1 GiB free pages, 20.2 GiB file-backed
+info: GLM-5.3-Flash loaded in 20.9 s (180.6 GB of weights), context 1048576 tokens, 3 streams
+[tensorfold] serving GLM-5.3-Flash-MLX-4bit at http://0.0.0.0:8888/v1 (sampling: greedy; drafts: on; context: 1048576; loaded in 21.3s)
+# after the load: 202.1 GiB wired, 3.4 GiB free pages, 21.3 GiB file-backed, pressure normal
+# replies: quality.suite --compare against evidence/2026-10-10-1.0.5/suite/replies.json: ranks 12/12 all identical

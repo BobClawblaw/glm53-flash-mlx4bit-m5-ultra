@@ -1,0 +1,184 @@
+{
+ "name": "drafts",
+ "score": 1.0,
+ "cases": 12,
+ "passed": 12,
+ "seconds": 65.34881019592285,
+ "notes": [
+  "drafted 76 tok/s vs undrafted 60 tok/s"
+ ],
+ "details": {
+  "drafted": [
+   {
+    "prompt": "Explain, in about 150 words, why the sky is blue and sunsets are red.",
+    "sha": "3b1a7307fe5c",
+    "tokens": 193,
+    "tok_s": 87.30574471632993,
+    "text": "The sky is blue because of a phenomenon called **Rayleigh scattering**. Sunlight contains all colors of the visible spectrum, and as it passes through the atmosphere, it collides with gas molecules (mostly nitrogen and oxygen) that are much smaller than the light's wavelength. These molecules scatter shorter wavelengths \u2014 blue and violet \u2014 much more strongly than longer ones (roughly by the inverse fourth power of wavelength). Our eyes are also less sensitive to violet, and some violet is absorbed higher up, so the scattered light we see is predominantly blue.\n\nAt sunset, sunlight travels through much more of the atmosphere to reach your eyes. Along this long path, most of the blue light is scattered out of the beam entirely, leaving the longer wavelengths \u2014 reds and oranges \u2014 to pass through. Those warm colors then illuminate clouds and haze near the horizon, painting the sky in fiery hues. The same physics, viewed from a different angle and path length, explains both."
+   },
+   {
+    "prompt": "Write a Python function that parses an ISO-8601 date string and returns the day of the week, with a docstring and two examples.",
+    "sha": "bc047ab8b170",
+    "tokens": 300,
+    "tok_s": 101.17681990189699,
+    "text": "```python\nfrom datetime import datetime\n\ndef day_of_week(iso_date: str) -> str:\n    \"\"\"\n    Parse an ISO-8601 date string and return the day of the week.\n\n    Args:\n        iso_date: A date string in ISO-8601 format (e.g., \"2024-06-15\").\n\n    Returns:\n        The English name of the day of the week (e.g., \"Saturday\").\n\n    Raises:\n        ValueError: If the string is not a valid ISO-8601 date.\n\n    Examples:\n        >>> day_of_week(\"2024-06-15\")\n        'Saturday'\n        >>> day_of_week(\"2000-01-01\")\n        'Saturday'\n    \"\"\"\n    return datetime.strptime(iso_date, \"%Y-%m-%d\").strftime(\"%A\")\n```\n\n**How it works:**\n- `datetime.strptime` parses the string using the `%Y-%m-%d` format (the standard ISO-8601 date form, e.g. `2024-06-15`).\n- `strftime(\"%A\")` formats the resulting date as the full weekday name.\n\n**Quick check:**\n\n```python\nprint(day_of_week(\"2024-06-15\"))  # Saturday\nprint(day_of_week(\"2000-01-01\"))  # Saturday\n```\n\nIf you need to support full ISO-8601 timestamps too (e.g. `\"2024-06-15"
+   },
+   {
+    "prompt": "List five differences between TCP and UDP as a numbered list, one sentence each.",
+    "sha": "f6e5712ddb4e",
+    "tokens": 151,
+    "tok_s": 56.47828882025401,
+    "text": "1. TCP is connection-oriented, requiring a handshake before data transfer, while UDP is connectionless and sends data without establishing a connection.\n2. TCP guarantees reliable, ordered delivery of data, while UDP provides no guarantee of delivery, ordering, or error checking.\n3. TCP is slower due to overhead from acknowledgments, retransmissions, and flow control, while UDP is faster with minimal protocol overhead.\n4. TCP is best suited for applications requiring accuracy, such as web browsing, email, and file transfers, while UDP is ideal for speed-sensitive applications like video streaming, gaming, and VoIP.\n5. TCP performs congestion control to avoid overwhelming the network, while UDP has no congestion control and can consume bandwidth as fast as the application allows."
+   },
+   {
+    "prompt": "Translate to French: 'The committee postponed the vote until the engineers had finished their report.'",
+    "sha": "45fdb17c3998",
+    "tokens": 179,
+    "tok_s": 93.00131141781205,
+    "text": "Here's the French translation:\n\n**\u00ab Le comit\u00e9 a report\u00e9 le vote jusqu'\u00e0 ce que les ing\u00e9nieurs aient termin\u00e9 leur rapport. \u00bb**\n\nA few notes on the translation:\n\n- **\u00ab a report\u00e9 \u00bb** \u2014 the pass\u00e9 compos\u00e9 is the natural choice for a completed past action in this context.\n- **\u00ab jusqu'\u00e0 ce que \u00bb** \u2014 this conjunction requires the **subjunctive** mood in French, which is why the verb becomes **\u00ab aient termin\u00e9 \u00bb** (past subjunctive) rather than the indicative \u00ab ont termin\u00e9 \u00bb.\n- **\u00ab leur rapport \u00bb** \u2014 the singular possessive works here since the engineers share one report, matching the English.\n\nAn alternative phrasing you might also hear: \u00ab Le comit\u00e9 a diff\u00e9r\u00e9 le vote jusqu'\u00e0 ce que les ing\u00e9nieurs aient achev\u00e9 leur rapport. \u00bb"
+   },
+   {
+    "prompt": "Write a bash script that renames every .jpeg file in a directory tree to .jpg, skipping files whose target name exists, and prints a summary.",
+    "sha": "ab05982ed250",
+    "tokens": 300,
+    "tok_s": 72.7675866931276,
+    "text": "# Bash Script: Rename `.jpeg` \u2192 `.jpg`\n\n```bash\n#!/usr/bin/env bash\n#\n# rename-jpeg.sh \u2014 Rename all .jpeg files in a directory tree to .jpg.\n# Skips files whose target name already exists, and prints a summary.\n\nset -u  # treat unset variables as errors\n\n# --- Configuration ---------------------------------------------------------\nTARGET_DIR=\"${1:-.}\"   # directory to process (defaults to current dir)\n\n# --- Sanity checks ---------------------------------------------------------\nif [[ ! -d \"$TARGET_DIR\" ]]; then\n    echo \"Error: '$TARGET_DIR' is not a directory.\" >&2\n    exit 1\nfi\n\n# --- Counters --------------------------------------------------------------\nrenamed=0\nskipped=0\nerrors=0\n\n# --- Main loop -------------------------------------------------------------\n# -print0 / read -d '' handles filenames with spaces, newlines, quotes, etc.\nwhile IFS= read -r -d '' file; do\n    # Strip the trailing \".jpeg\" (case-insensitive) and append \".jpg\"\n    target=\"${file%.jpeg}\"\n    target=\"${target}.jpg\"\n\n    if [[ -e \"$target\" ]]; then\n        echo \"SKIP: '$file' -> '$target' already exists\"\n        ((skipped++))\n    else\n        if mv -n -- \"$file\" \"$target\"; then\n            echo \"RENAME: '$file' -> '$target'\"\n            ((renamed++))\n        else\n            echo \"ERROR"
+   },
+   {
+    "prompt": "A train leaves at 09:40 and arrives at 14:05 after a 25-minute stop. What is its moving time? Show the steps briefly.",
+    "sha": "ae1c6044ac61",
+    "tokens": 129,
+    "tok_s": 95.08132862758949,
+    "text": "# Train Moving Time\n\n## Step 1: Find Total Journey Time\nFrom 09:40 to 14:05:\n- 09:40 \u2192 14:40 would be 5 hours\n- But we need 14:05, which is 35 minutes earlier\n\n**Total time = 4 hours 25 minutes**\n\n## Step 2: Subtract the Stop\n$$4 \\text{ h } 25 \\text{ min} - 25 \\text{ min} = 4 \\text{ h } 0 \\text{ min}$$\n\n## Answer\n**Moving time = 4 hours**"
+   },
+   {
+    "prompt": "Summarize the plot of a heist film you invent, in exactly four sentences.",
+    "sha": "e1ed6bbb293a",
+    "tokens": 234,
+    "tok_s": 55.63013465942795,
+    "text": "**The Last Vault** \u2014 In 1970s Detroit, a disgraced safecracker fresh out of prison is pulled into one last job by his estranged daughter, a sharp-tongued insurance investigator who's discovered that the corrupt bank that framed her father twenty years ago is about to demolish its flagship branch \u2014 along with the untraceable bearer bonds hidden in a sealed vault no blueprints acknowledge. The crew is a family of misfits: a getaway driver who's legally blind but compensates with an uncanny memory of the city's streets, a demolitions expert terrified of loud noises, and a smooth-talking inside man who's actually a double agent working for the bank president. As the heist unfolds during the building's chaotic demolition day, the double agent's betrayal triggers a deadly chain of events, forcing the father and daughter to escape through the collapsing structure while the vault's time-lock counts down. In the end, they walk away with the bonds and something more valuable \u2014 the truth, as the daughter turns the evidence of the bank's old crime over to the FBI, letting the father finally walk free of his past."
+   },
+   {
+    "prompt": "Give a JSON array of three objects, each with keys city, country and population (integer), for three large Asian cities.",
+    "sha": "f154de6642b8",
+    "tokens": 93,
+    "tok_s": 90.55333192145218,
+    "text": "```json\n[\n  {\n    \"city\": \"Tokyo\",\n    \"country\": \"Japan\",\n    \"population\": 13960000\n  },\n  {\n    \"city\": \"Delhi\",\n    \"country\": \"India\",\n    \"population\": 32900000\n  },\n  {\n    \"city\": \"Shanghai\",\n    \"country\": \"China\",\n    \"population\": 24870000\n  }\n]\n```"
+   },
+   {
+    "prompt": "Rewrite this sentence in the passive voice and then in the imperative: 'The engineer calibrates the sensor every morning.'",
+    "sha": "b5eae63f10e4",
+    "tokens": 123,
+    "tok_s": 52.4026276538191,
+    "text": "# Sentence Transformations\n\n**Original:** The engineer calibrates the sensor every morning.\n\n**Passive Voice:**\nThe sensor is calibrated by the engineer every morning.\n\n**Imperative:**\nCalibrate the sensor every morning.\n\n---\n\n**Quick notes:**\n- **Passive voice** shifts the focus from the doer (engineer) to the receiver of the action (sensor). The object becomes the subject, and the verb changes to \"is + past participle.\"\n- **Imperative** drops the subject entirely and uses the base form of the verb, giving a command or instruction."
+   },
+   {
+    "prompt": "What is 17 * 23? Then subtract 91 and divide by 5. Show each step.",
+    "sha": "f8087f76c2ff",
+    "tokens": 117,
+    "tok_s": 95.55055957514527,
+    "text": "# Step-by-Step Solution\n\n## Step 1: Multiply 17 \u00d7 23\n\n$$17 \\times 23 = 391$$\n\n*Breaking it down:*\n- 17 \u00d7 20 = 340\n- 17 \u00d7 3 = 51\n- 340 + 51 = **391**\n\n## Step 2: Subtract 91\n\n$$391 - 91 = 300$$\n\n## Step 3: Divide by 5\n\n$$300 \\div 5 = 60$$\n\n## Final Answer: **60**"
+   },
+   {
+    "prompt": "Write a haiku about a lighthouse, then explain its syllable count.",
+    "sha": "23e4620a4751",
+    "tokens": 300,
+    "tok_s": 95.1907151945834,
+    "text": "A haiku is a traditional Japanese poem with a 5-7-5 syllable pattern across three lines. Here's one about a lighthouse:\n\n**Lighthouse Haiku:**\n\n> Beacon on the cliff (5)\n> Sweeping arms of golden light (7)\n> Guides ships through the night (5)\n\n**Syllable Breakdown:**\n\n**Line 1: \"Beacon on the cliff\" \u2014 5 syllables**\n- Bea-con (2)\n- on (1)\n- the (1)\n- cliff (1)\n- Total: 2 + 1 + 1 + 1 = **5** \u2713\n\n**Line 2: \"Sweeping arms of golden light\" \u2014 7 syllables**\n- Sweep-ing (2)\n- arms (1)\n- of (1)\n- gold-en (2)\n- light (1)\n- Total: 2 + 1 + 1 + 2 + 1 = **7** \u2713\n\n**Line 3: \"Guides ships through the night\" \u2014 5 syllables**\n- Guides (1)\n- ships (1)\n- through (1)\n- the (1)\n- night (1)\n- Total: 1 + 1 + 1 + 1 + 1 = **5** \u2713\n\nThe poem follows the classic 5-7-5 structure, and the imagery works well too \u2014 the lighthouse's rotating beam is compared to \"s"
+   },
+   {
+    "prompt": "Name the planets of the solar system in order from the Sun, one per line, and mark the gas giants with an asterisk.",
+    "sha": "c903db274cd2",
+    "tokens": 25,
+    "tok_s": 17.584744180138763,
+    "text": "Mercury\nVenus\nEarth\nMars\nJupiter*\nSaturn*\nUranus*\nNeptune*"
+   }
+  ],
+  "undrafted": [
+   {
+    "prompt": "Explain, in about 150 words, why the sky is blue and sunsets are red.",
+    "sha": "3b1a7307fe5c",
+    "tokens": 193,
+    "tok_s": 74.08136469559476,
+    "text": "The sky is blue because of a phenomenon called **Rayleigh scattering**. Sunlight contains all colors of the visible spectrum, and as it passes through the atmosphere, it collides with gas molecules (mostly nitrogen and oxygen) that are much smaller than the light's wavelength. These molecules scatter shorter wavelengths \u2014 blue and violet \u2014 much more strongly than longer ones (roughly by the inverse fourth power of wavelength). Our eyes are also less sensitive to violet, and some violet is absorbed higher up, so the scattered light we see is predominantly blue.\n\nAt sunset, sunlight travels through much more of the atmosphere to reach your eyes. Along this long path, most of the blue light is scattered out of the beam entirely, leaving the longer wavelengths \u2014 reds and oranges \u2014 to pass through. Those warm colors then illuminate clouds and haze near the horizon, painting the sky in fiery hues. The same physics, viewed from a different angle and path length, explains both."
+   },
+   {
+    "prompt": "Write a Python function that parses an ISO-8601 date string and returns the day of the week, with a docstring and two examples.",
+    "sha": "bc047ab8b170",
+    "tokens": 300,
+    "tok_s": 74.93481607776476,
+    "text": "```python\nfrom datetime import datetime\n\ndef day_of_week(iso_date: str) -> str:\n    \"\"\"\n    Parse an ISO-8601 date string and return the day of the week.\n\n    Args:\n        iso_date: A date string in ISO-8601 format (e.g., \"2024-06-15\").\n\n    Returns:\n        The English name of the day of the week (e.g., \"Saturday\").\n\n    Raises:\n        ValueError: If the string is not a valid ISO-8601 date.\n\n    Examples:\n        >>> day_of_week(\"2024-06-15\")\n        'Saturday'\n        >>> day_of_week(\"2000-01-01\")\n        'Saturday'\n    \"\"\"\n    return datetime.strptime(iso_date, \"%Y-%m-%d\").strftime(\"%A\")\n```\n\n**How it works:**\n- `datetime.strptime` parses the string using the `%Y-%m-%d` format (the standard ISO-8601 date form, e.g. `2024-06-15`).\n- `strftime(\"%A\")` formats the resulting date as the full weekday name.\n\n**Quick check:**\n\n```python\nprint(day_of_week(\"2024-06-15\"))  # Saturday\nprint(day_of_week(\"2000-01-01\"))  # Saturday\n```\n\nIf you need to support full ISO-8601 timestamps too (e.g. `\"2024-06-15"
+   },
+   {
+    "prompt": "List five differences between TCP and UDP as a numbered list, one sentence each.",
+    "sha": "f6e5712ddb4e",
+    "tokens": 151,
+    "tok_s": 35.81539523439753,
+    "text": "1. TCP is connection-oriented, requiring a handshake before data transfer, while UDP is connectionless and sends data without establishing a connection.\n2. TCP guarantees reliable, ordered delivery of data, while UDP provides no guarantee of delivery, ordering, or error checking.\n3. TCP is slower due to overhead from acknowledgments, retransmissions, and flow control, while UDP is faster with minimal protocol overhead.\n4. TCP is best suited for applications requiring accuracy, such as web browsing, email, and file transfers, while UDP is ideal for speed-sensitive applications like video streaming, gaming, and VoIP.\n5. TCP performs congestion control to avoid overwhelming the network, while UDP has no congestion control and can consume bandwidth as fast as the application allows."
+   },
+   {
+    "prompt": "Translate to French: 'The committee postponed the vote until the engineers had finished their report.'",
+    "sha": "45fdb17c3998",
+    "tokens": 179,
+    "tok_s": 51.02974667636333,
+    "text": "Here's the French translation:\n\n**\u00ab Le comit\u00e9 a report\u00e9 le vote jusqu'\u00e0 ce que les ing\u00e9nieurs aient termin\u00e9 leur rapport. \u00bb**\n\nA few notes on the translation:\n\n- **\u00ab a report\u00e9 \u00bb** \u2014 the pass\u00e9 compos\u00e9 is the natural choice for a completed past action in this context.\n- **\u00ab jusqu'\u00e0 ce que \u00bb** \u2014 this conjunction requires the **subjunctive** mood in French, which is why the verb becomes **\u00ab aient termin\u00e9 \u00bb** (past subjunctive) rather than the indicative \u00ab ont termin\u00e9 \u00bb.\n- **\u00ab leur rapport \u00bb** \u2014 the singular possessive works here since the engineers share one report, matching the English.\n\nAn alternative phrasing you might also hear: \u00ab Le comit\u00e9 a diff\u00e9r\u00e9 le vote jusqu'\u00e0 ce que les ing\u00e9nieurs aient achev\u00e9 leur rapport. \u00bb"
+   },
+   {
+    "prompt": "Write a bash script that renames every .jpeg file in a directory tree to .jpg, skipping files whose target name exists, and prints a summary.",
+    "sha": "ab05982ed250",
+    "tokens": 300,
+    "tok_s": 74.92331130970113,
+    "text": "# Bash Script: Rename `.jpeg` \u2192 `.jpg`\n\n```bash\n#!/usr/bin/env bash\n#\n# rename-jpeg.sh \u2014 Rename all .jpeg files in a directory tree to .jpg.\n# Skips files whose target name already exists, and prints a summary.\n\nset -u  # treat unset variables as errors\n\n# --- Configuration ---------------------------------------------------------\nTARGET_DIR=\"${1:-.}\"   # directory to process (defaults to current dir)\n\n# --- Sanity checks ---------------------------------------------------------\nif [[ ! -d \"$TARGET_DIR\" ]]; then\n    echo \"Error: '$TARGET_DIR' is not a directory.\" >&2\n    exit 1\nfi\n\n# --- Counters --------------------------------------------------------------\nrenamed=0\nskipped=0\nerrors=0\n\n# --- Main loop -------------------------------------------------------------\n# -print0 / read -d '' handles filenames with spaces, newlines, quotes, etc.\nwhile IFS= read -r -d '' file; do\n    # Strip the trailing \".jpeg\" (case-insensitive) and append \".jpg\"\n    target=\"${file%.jpeg}\"\n    target=\"${target}.jpg\"\n\n    if [[ -e \"$target\" ]]; then\n        echo \"SKIP: '$file' -> '$target' already exists\"\n        ((skipped++))\n    else\n        if mv -n -- \"$file\" \"$target\"; then\n            echo \"RENAME: '$file' -> '$target'\"\n            ((renamed++))\n        else\n            echo \"ERROR"
+   },
+   {
+    "prompt": "A train leaves at 09:40 and arrives at 14:05 after a 25-minute stop. What is its moving time? Show the steps briefly.",
+    "sha": "ae1c6044ac61",
+    "tokens": 129,
+    "tok_s": 72.01455868025636,
+    "text": "# Train Moving Time\n\n## Step 1: Find Total Journey Time\nFrom 09:40 to 14:05:\n- 09:40 \u2192 14:40 would be 5 hours\n- But we need 14:05, which is 35 minutes earlier\n\n**Total time = 4 hours 25 minutes**\n\n## Step 2: Subtract the Stop\n$$4 \\text{ h } 25 \\text{ min} - 25 \\text{ min} = 4 \\text{ h } 0 \\text{ min}$$\n\n## Answer\n**Moving time = 4 hours**"
+   },
+   {
+    "prompt": "Summarize the plot of a heist film you invent, in exactly four sentences.",
+    "sha": "e1ed6bbb293a",
+    "tokens": 234,
+    "tok_s": 74.80144551039173,
+    "text": "**The Last Vault** \u2014 In 1970s Detroit, a disgraced safecracker fresh out of prison is pulled into one last job by his estranged daughter, a sharp-tongued insurance investigator who's discovered that the corrupt bank that framed her father twenty years ago is about to demolish its flagship branch \u2014 along with the untraceable bearer bonds hidden in a sealed vault no blueprints acknowledge. The crew is a family of misfits: a getaway driver who's legally blind but compensates with an uncanny memory of the city's streets, a demolitions expert terrified of loud noises, and a smooth-talking inside man who's actually a double agent working for the bank president. As the heist unfolds during the building's chaotic demolition day, the double agent's betrayal triggers a deadly chain of events, forcing the father and daughter to escape through the collapsing structure while the vault's time-lock counts down. In the end, they walk away with the bonds and something more valuable \u2014 the truth, as the daughter turns the evidence of the bank's old crime over to the FBI, letting the father finally walk free of his past."
+   },
+   {
+    "prompt": "Give a JSON array of three objects, each with keys city, country and population (integer), for three large Asian cities.",
+    "sha": "f154de6642b8",
+    "tokens": 93,
+    "tok_s": 70.31613719430533,
+    "text": "```json\n[\n  {\n    \"city\": \"Tokyo\",\n    \"country\": \"Japan\",\n    \"population\": 13960000\n  },\n  {\n    \"city\": \"Delhi\",\n    \"country\": \"India\",\n    \"population\": 32900000\n  },\n  {\n    \"city\": \"Shanghai\",\n    \"country\": \"China\",\n    \"population\": 24870000\n  }\n]\n```"
+   },
+   {
+    "prompt": "Rewrite this sentence in the passive voice and then in the imperative: 'The engineer calibrates the sensor every morning.'",
+    "sha": "b5eae63f10e4",
+    "tokens": 123,
+    "tok_s": 43.32721228399456,
+    "text": "# Sentence Transformations\n\n**Original:** The engineer calibrates the sensor every morning.\n\n**Passive Voice:**\nThe sensor is calibrated by the engineer every morning.\n\n**Imperative:**\nCalibrate the sensor every morning.\n\n---\n\n**Quick notes:**\n- **Passive voice** shifts the focus from the doer (engineer) to the receiver of the action (sensor). The object becomes the subject, and the verb changes to \"is + past participle.\"\n- **Imperative** drops the subject entirely and uses the base form of the verb, giving a command or instruction."
+   },
+   {
+    "prompt": "What is 17 * 23? Then subtract 91 and divide by 5. Show each step.",
+    "sha": "f8087f76c2ff",
+    "tokens": 117,
+    "tok_s": 42.993071704407534,
+    "text": "# Step-by-Step Solution\n\n## Step 1: Multiply 17 \u00d7 23\n\n$$17 \\times 23 = 391$$\n\n*Breaking it down:*\n- 17 \u00d7 20 = 340\n- 17 \u00d7 3 = 51\n- 340 + 51 = **391**\n\n## Step 2: Subtract 91\n\n$$391 - 91 = 300$$\n\n## Step 3: Divide by 5\n\n$$300 \\div 5 = 60$$\n\n## Final Answer: **60**"
+   },
+   {
+    "prompt": "Write a haiku about a lighthouse, then explain its syllable count.",
+    "sha": "23e4620a4751",
+    "tokens": 300,
+    "tok_s": 48.95299970421155,
+    "text": "A haiku is a traditional Japanese poem with a 5-7-5 syllable pattern across three lines. Here's one about a lighthouse:\n\n**Lighthouse Haiku:**\n\n> Beacon on the cliff (5)\n> Sweeping arms of golden light (7)\n> Guides ships through the night (5)\n\n**Syllable Breakdown:**\n\n**Line 1: \"Beacon on the cliff\" \u2014 5 syllables**\n- Bea-con (2)\n- on (1)\n- the (1)\n- cliff (1)\n- Total: 2 + 1 + 1 + 1 = **5** \u2713\n\n**Line 2: \"Sweeping arms of golden light\" \u2014 7 syllables**\n- Sweep-ing (2)\n- arms (1)\n- of (1)\n- gold-en (2)\n- light (1)\n- Total: 2 + 1 + 1 + 2 + 1 = **7** \u2713\n\n**Line 3: \"Guides ships through the night\" \u2014 5 syllables**\n- Guides (1)\n- ships (1)\n- through (1)\n- the (1)\n- night (1)\n- Total: 1 + 1 + 1 + 1 + 1 = **5** \u2713\n\nThe poem follows the classic 5-7-5 structure, and the imagery works well too \u2014 the lighthouse's rotating beam is compared to \"s"
+   },
+   {
+    "prompt": "Name the planets of the solar system in order from the Sun, one per line, and mark the gas giants with an asterisk.",
+    "sha": "c903db274cd2",
+    "tokens": 25,
+    "tok_s": 55.83519172748195,
+    "text": "Mercury\nVenus\nEarth\nMars\nJupiter*\nSaturn*\nUranus*\nNeptune*"
+   }
+  ]
+ }
+}

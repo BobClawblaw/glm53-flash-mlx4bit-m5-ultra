@@ -1,7 +1,7 @@
 # Notes for agents working on this recipe
 
 GLM-5.3-Flash MLX 4-bit on one 256 GB M5 Ultra, served by TensorFold's native engine (v1.0.5, `bec00ae6`) with
-`patches/glm-one-mac-vision-pool-v1.0.5.patch`. See README.md for use, `evidence/` for measurements. Published (see
+`patches/glm-one-mac-vision-pool-wiredreads-v1.0.5.patch`. See README.md for use, `evidence/` for measurements. Published (see
 below).
 
 ## State (2026-10-10)
@@ -50,7 +50,9 @@ Commit the folder it writes under `evidence/`, then update the README tables fro
 - The user's hard constraint: do not OOM the Mac. An unwired load once made jetsam kill ~300 system daemons.
   Keep `residency = true` (GLM_RESIDENCY + GLM_WIRE) and memguard on. `up` refuses for 15 min after a memguard kill
   (`MEMGUARD_RETRY=1` overrides; use it only once the cause is gone).
-- `pgrep -f` patterns appear in the watcher's own command line: use `[t]ensorfold-native`.
+- `pgrep -f` patterns appear in the watcher's own command line: use `[t]ensorfold-native` (also for powermetrics).
+- Loads with ~20 GB of other file cache: 1.0.5's paced reads wait for 8 GB of free pages the kernel never keeps;
+  the patch skips that wait when the buffers are wired (GLM_WIRE). Without it a load stalls at 200 GiB wired.
 - The native GLM engine is greedy-only; the patch serves any temperature greedily.
 - The user wants everything in the native engine, not the Python 0.6.6 path. The 0.6.6 + mlx-vlm venv
   (~/.cache/tensorfold-glm53/python/venv) is only a numeric reference for `tools/vision_reference.py` and

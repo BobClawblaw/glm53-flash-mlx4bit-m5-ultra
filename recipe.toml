@@ -24,9 +24,12 @@ tensorfold_src = "~/github/TensorFold"   # a checkout holding the sha; `build` a
 #  - the streams share one MLA cache pool of the whole window (families/glm/slots.zig): a request takes prompt +
 #    max_tokens from it while it runs, admission waits when it does not fit, and a kept prompt state holds the blocks
 #    under its prefix after its stream leaves until a new request needs them.
+#  - with GLM_WIRE the weights' reads skip 1.0.5's wait for free memory (paced_read): the buffers are wired before
+#    the reads, so a read takes no free page, and with ~20 GB of other file cache on the Mac the kernel keeps free
+#    memory under that wait's 8 GB floor (a load sat 5 min at 200 GiB wired).
 # 1.0.5's own GLM_LOAD_LIMIT_GB carries the one-Mac load limit past 70% of RAM (the panic risk on its log).
-patch = "glm-one-mac-vision-pool-v1.0.5.patch"
-patch_sha256 = "80264a24edd3182dffcba902619fcb72f8d36325faa38160ceff7697af7d30b9"
+patch = "glm-one-mac-vision-pool-wiredreads-v1.0.5.patch"
+patch_sha256 = "706814e87963a911150cf5a3d2cb92c34f5b1ed6151db72f2fd083554dae87a9"
 zig = "~/.local/zig/zig"                 # Zig 0.17.0 (.zig-version in the checkout)
 zig_cpu = "apple_m1"
 binary = ""                              # a prebuilt tensorfold-native to serve with instead of the pinned build

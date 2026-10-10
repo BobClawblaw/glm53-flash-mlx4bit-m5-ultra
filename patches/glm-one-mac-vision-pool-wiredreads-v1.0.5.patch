@@ -446,6 +446,35 @@ index a91cff4d..b8a6764e 100644
          };
          try s.context.appendSlice(gpa, spec.prompt);
          return s;
+diff --git a/zig/src/core/paced_read.zig b/zig/src/core/paced_read.zig
+index edd9c95b..7044255a 100644
+--- a/zig/src/core/paced_read.zig
++++ b/zig/src/core/paced_read.zig
+@@ -40,11 +40,12 @@ pub fn waitForRoom(limit_ms: u32) void {
+     }
+ }
+ 
+-/// `dest.len` bytes at `at` of `fd` (opened with F_NOCACHE) through page-aligned reads into `buf`, pausing for free memory.
+-pub fn read(fd: std.c.fd_t, dest: []u8, at: u64, buf: Stage) !void {
++/// `dest.len` bytes at `at` of `fd` (opened with F_NOCACHE) through page-aligned reads into `buf`, pausing for free memory
++/// unless `dest` is already wired (its pages committed: the read takes no free page).
++pub fn read(fd: std.c.fd_t, dest: []u8, at: u64, buf: Stage, wired: bool) !void {
+     var done: usize = 0;
+     while (done < dest.len) {
+-        waitForRoom(10_000);
++        if (!wired) waitForRoom(10_000);
+         const pos = at + done;
+         const lo = std.mem.alignBackward(u64, pos, alignment);
+         const skip: usize = @intCast(pos - lo);
+@@ -80,7 +81,7 @@ test "aligned spans copy the bytes asked for, at any offset and length" {
+     for ([_][2]usize{ .{ 0, 1 }, .{ 5, 100 }, .{ alignment - 3, 10 }, .{ 1, 2 * alignment + 50 }, .{ 3 * alignment, 777 }, .{ 9, data.len - 9 } }) |c| {
+         const out = try gpa.alloc(u8, c[1]);
+         defer gpa.free(out);
+-        try read(fd, out, c[0], buf);
++        try read(fd, out, c[0], buf, false);
+         try std.testing.expectEqualSlices(u8, data[c[0]..][0..c[1]], out);
+     }
+ }
 diff --git a/zig/src/families/glm/backend.zig b/zig/src/families/glm/backend.zig
 index 93db1865..7e0da35b 100644
 --- a/zig/src/families/glm/backend.zig
@@ -2030,10 +2059,43 @@ index 00000000..5e815ad3
 +    try std.testing.expectEqual(@as(u16, 0x3f81), bf16(@bitCast(@as(u32, 0x3f808001))));
 +}
 diff --git a/zig/src/families/glm/weights.zig b/zig/src/families/glm/weights.zig
-index 9fae40b3..2e454f84 100644
+index 9fae40b3..bb54a170 100644
 --- a/zig/src/families/glm/weights.zig
 +++ b/zig/src/families/glm/weights.zig
-@@ -503,8 +503,22 @@ fn runCopies(l: *Loader, threads: usize) !void {
+@@ -447,6 +447,7 @@ const Pool = struct {
+     jobs: []const Copy,
+     next: std.atomic.Value(usize) = .init(0),
+     failed: std.atomic.Value(bool) = .init(false),
++    wired: bool = false, // GLM_WIRE: the buffers are wired before the reads, which then wait for no free memory
+ 
+     fn run(p: *Pool) void {
+         const buf = paced_read.stage(std.heap.page_allocator, 16 << 20) catch {
+@@ -458,13 +459,13 @@ const Pool = struct {
+             const i = p.next.fetchAdd(1, .monotonic);
+             if (i >= p.jobs.len) return;
+             const j = p.jobs[i];
+-            paced_read.read(p.fds[j.shard], j.dst[0..j.len], j.off, buf) catch p.failed.store(true, .release);
++            paced_read.read(p.fds[j.shard], j.dst[0..j.len], j.off, buf, p.wired) catch p.failed.store(true, .release);
+         }
+     }
+ };
+ 
+ /// Every copy on `threads` threads, uncached and paced by free memory (a large load otherwise fills the page cache too).
+-fn runCopies(l: *Loader, threads: usize) !void {
++fn runCopies(l: *Loader, threads: usize, wired: bool) !void {
+     const fds = try l.gpa.alloc(std.c.fd_t, l.shards.items.len);
+     defer l.gpa.free(fds);
+     for (l.shards.items, fds) |path, *fd| {
+@@ -475,7 +476,7 @@ fn runCopies(l: *Loader, threads: usize) !void {
+     defer for (fds) |fd| {
+         _ = std.c.close(fd);
+     };
+-    var pool: Pool = .{ .fds = fds, .jobs = l.copies.items };
++    var pool: Pool = .{ .fds = fds, .jobs = l.copies.items, .wired = wired };
+     const workers = try l.gpa.alloc(?std.Thread, threads);
+     defer l.gpa.free(workers);
+     for (workers) |*t| t.* = std.Thread.spawn(.{}, Pool.run, .{&pool}) catch null;
+@@ -503,8 +504,22 @@ fn runCopies(l: *Loader, threads: usize) !void {
      if (tx.failed.load(.acquire)) return error.TransformFailed;
  }
  
@@ -2057,17 +2119,18 @@ index 9fae40b3..2e454f84 100644
      var arena_state = std.heap.ArenaAllocator.init(gpa);
      defer arena_state.deinit();
      const w = try gpa.create(Weights);
-@@ -532,6 +546,12 @@ pub fn load(gpa: std.mem.Allocator, device: mtl.Device, dir: []const u8, c: *con
+@@ -532,6 +547,12 @@ pub fn load(gpa: std.mem.Allocator, device: mtl.Device, dir: []const u8, c: *con
          std.debug.print("glm plan: {d} of {d} layers{s}, {d:.2} GB in buffers, every tensor's name, dtype and shape checked\n", .{ c.run, c.layers, if (has_mtp) " and the MTP layer" else "", @as(f64, @floatFromInt(w.bytes)) / 1e9 });
          return w;
      }
+-    try runCopies(&l, threads);
 +    if (wire) for (w.buffers.items) |b| try wireBuffer(b);
 +    if (resident) |set| { // resident before the reads: buffers no command has used yet are what the driver's collector reclaims
 +        for (w.buffers.items) |b| set.add(b);
 +        set.commit();
 +        set.requestResidency();
 +    }
-     try runCopies(&l, threads);
++    try runCopies(&l, threads, wire);
      return w;
  }
 diff --git a/zig/src/native/glm_host.zig b/zig/src/native/glm_host.zig

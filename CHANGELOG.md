@@ -2,6 +2,10 @@
 
 ## 2026-10-10
 
+- **Wired loads no longer wait on free memory.** With `GLM_WIRE` the weight reads skip 1.0.5's paced-read wait
+  (`glm-one-mac-vision-pool-wiredreads-v1.0.5.patch`): the buffers are wired before the reads, so a read takes no free
+  page, and ~20 GB of other file cache kept free memory under the wait's 8 GB floor, stalling a load at 200 GiB wired
+  for 5 minutes. Now 22 s in the same state; snapshot, drafts and concurrent replies equal the earlier 1.0.5 run's.
 - **TensorFold 1.0.5** (`bec00ae6`) with `patches/glm-one-mac-vision-pool-v1.0.5.patch`. 1.0.5's own
   `GLM_LOAD_LIMIT_GB` replaces the patched `TENSORFOLD_MEMORY_LIMIT_GB` (the recipe still sets 215), and its faster
   GLM decode and prompt kernels, out-of-page-cache loads and the prompt cache for prompts under 4,096 tokens come with

@@ -18,13 +18,16 @@ You get:
 
 TensorFold 1.0.5 serves GLM text on one 256 GB Mac when `GLM_LOAD_LIMIT_GB` raises its load limit past 70% of RAM
 (179.2 GB here; the language model alone is 180.6 GB), and the recipe sets 215.
-[`patches/glm-one-mac-vision-pool-v1.0.5.patch`](patches/), pinned by sha256, changes four things on top:
+[`patches/glm-one-mac-vision-pool-wiredreads-v1.0.5.patch`](patches/), pinned by sha256, changes four things on top:
 
 1. **Wired loading.** Past about 110 GB of freshly written buffers, the GPU driver's wired collector handed the
    buffers no command had touched yet to the VM compressor: 145 GiB at the peak, with pressure still normal. One
    unwired load ended with jetsam killing about 300 system daemons, then the server. With `GLM_RESIDENCY` +
    `GLM_WIRE`, every buffer is resident and wired (mlock) before the reads fill it. The full model then loads in 22 s
-   with the compressor flat.
+   with the compressor flat. Wired, the reads also skip 1.0.5's wait for free memory before each read: they take no
+   free page, and with ~20 GB of other programs' file cache on the Mac the kernel keeps free memory under that
+   wait's 8 GB floor, so a load sat for 5 minutes at 200 GiB wired. With the skip it loads in 22 s in the same state,
+   with the same replies ([`evidence/2026-10-10-wiredreads/`](evidence/2026-10-10-wiredreads/)).
 2. **Native image input** (`--vision`):
    - the checkpoint's 24-block tower on Metal;
    - images decoded through ImageIO;
