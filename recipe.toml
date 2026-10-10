@@ -23,8 +23,8 @@ tensorfold_src = "~/github/TensorFold"   # a checkout holding the sha; `build` a
 #    (server/images.zig), the rows injected over the placeholders' embeddings in the prompt pass.
 #  - a request with a temperature is served greedily (the native GLM engine decodes greedily only), not failed:
 #    clients such as hermes always send one.
-patch = "glm-one-mac-vision-v1.0.4.patch"
-patch_sha256 = "f3568f28ee49d3f7c5cad7ac405b661730187c1752c8d166bcb72a2a52c27f87"
+patch = "glm-one-mac-vision-pool-v1.0.4.patch"
+patch_sha256 = "aa38b94990c86afd96d3eab71395a42129fcbf9de6d6fd03bc335376323558b1"
 zig = "~/.local/zig/zig"                 # Zig 0.17.0 (.zig-version in the checkout)
 zig_cpu = "apple_m1"
 binary = ""                              # a prebuilt tensorfold-native to serve with instead of the pinned build
@@ -38,10 +38,11 @@ request_log = ""                         # a file for TENSORFOLD_REQUEST_LOG; em
 
 [serve]
 profile = "chat"                 # chat (MTP drafts) | reference (--no-drafts, the exactness reference)
-# the window, of the checkpoint's 1,048,576. GLM's caches are small: 8.9 GB at 262,144, 24.2 GB at 1,048,576
-# (PROFILE=long), beside 180.6 GB of weights
-context = 262144
-parallel = 3                     # streams admitted at once, sharing rounds: ~5 GB of caches each at 262k; 1 queues
+# the window: the checkpoint's full 1,048,576. The streams share one cache pool of this many tokens (the patch's
+# pooled MLA caches, 24.2 GB beside 180.6 GB of weights): one request alone can use all of it, several split it, each
+# taking its prompt plus max_tokens while it runs
+context = 1048576
+parallel = 3                     # streams at once, sharing decode rounds and the pool (~0.3 GB of their own each)
 drafts = true
 reasoning_effort = "high"        # GLM-5.3's levels: low, high, max; "" leaves the template's default, max
 thinking = true                  # GLM-5.3 reasons first (reasoning_content); a request can send chat_template_kwargs {"enable_thinking": false}
@@ -62,10 +63,10 @@ vision_max_images = 4
 api_key = ""
 extra_args = ""
 extra_env = ""
-# memory: the engine refuses a one-Mac load past TENSORFOLD_MEMORY_LIMIT_GB (patched; stock: 70% of RAM). 210 GB holds
-# the 180.6 GB of weights, three streams' caches at 262k and the kept prompt states (~34 GiB left free); `up` also refuses when free memory is under the
+# memory: the engine refuses a one-Mac load past TENSORFOLD_MEMORY_LIMIT_GB (patched; stock: 70% of RAM). 215 GB holds
+# the 180.6 GB of weights, the 1M-token pool, three streams' own states and the kept prompt states; `up` also refuses when free memory is under the
 # engine's floor plus memory_margin_gib, and the watchdog below kills the server before the Mac swaps.
-memory_limit_gb = 210
+memory_limit_gb = 215
 residency = true                 # GLM_RESIDENCY and GLM_WIRE: the model resident and wired before its reads
 memory_margin_gib = 8
 memguard = true
@@ -80,10 +81,6 @@ drafts = true
 
 [profiles.reference]
 drafts = false
-
-[profiles.long]                   # the full 1,048,576-token window: 204.8 GB of weights and caches, ~20 GiB left free
-context = 1048576
-parallel = 1                      # a stream's caches are ~20 GB at this window: one fits
 memory_limit_gb = 215
 
 # The Spark recipe's quality suite and decode ruler run against any OpenAI-compatible URL. `python3 -m mac suite|ruler`

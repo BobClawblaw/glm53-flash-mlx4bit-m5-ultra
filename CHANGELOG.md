@@ -2,9 +2,15 @@
 
 ## 2026-10-10
 
-- **Three streams by default** (`parallel = 3`, `memory_limit_gb` 210; the long profile keeps one). Concurrent
-  requests share decode rounds: no queueing behind a long reply, aggregate 93-123 tok/s at two and three users, a lone
-  request as fast as before (`evidence/2026-10-10-parallel3/ruler/`).
+- **The full 1,048,576-token window, shared by three streams, by default.** The patch
+  (`glm-one-mac-vision-pool-v1.0.4.patch`) keeps one MLA cache pool of the window's size and gives each request a
+  slice for its prompt plus `max_tokens` while it runs; a request that does not fit waits for room. One request alone
+  can use the full window. Memory is the old one-stream 1M load's: ~200 GiB wired, ~27 GiB free (`memory_limit_gb`
+  215). `PROFILE=long` is gone: the default is the full window. Replies with streams together equal each alone, also
+  for long prompts at offsets in the pool (`evidence/2026-10-10-pool/`).
+- **Three streams** (`parallel = 3`): concurrent requests share decode rounds, no queueing behind a long reply,
+  aggregate 93-123 tok/s at two and three users, a lone request as fast as before
+  (`evidence/2026-10-10-parallel3/ruler/`).
 - **A 262,144-token window by default, and the full 1,048,576 with `PROFILE=long`.** GLM's caches are small (8.9 GB at
   262k, 24.2 GB at 1M, beside 180.6 GB of weights); the long profile raises `memory_limit_gb` to 215. At 1M the model
   loads in 24 s, 202 GiB wired, about 27 GiB free. Needles found at 200,465, 484,568 and 926,599 prompt tokens

@@ -1,17 +1,19 @@
 # Notes for agents working on this recipe
 
 GLM-5.3-Flash MLX 4-bit on one 256 GB M5 Ultra, served by TensorFold's native engine (v1.0.4, `d4fc1964`) with
-`patches/glm-one-mac-vision-v1.0.4.patch`. See README.md for use, `evidence/` for measurements. Nothing is
-published (see below).
+`patches/glm-one-mac-vision-pool-v1.0.4.patch`. See README.md for use, `evidence/` for measurements. Published (see
+below).
 
-## State (2026-10-09)
+## State (2026-10-10)
 
 - Done:
   - Native `--vision` (tower, preprocessing, server), wired loading, memguard, greedy fallback for clients that send
     a temperature.
-  - Defaults: port 8888, three streams (`parallel = 3`, limit 210 GB), a 262,144-token window (`PROFILE=long`: the full 1,048,576, needles found to 927k tokens),
-    thinking on at effort High.
-  - Engine on v1.0.4: 119/119 build steps, 773/775 tests, golden suite unchanged.
+  - Defaults: port 8888, the full 1,048,576-token window shared by three streams (the patch's MLA pool in
+    families/glm/slots.zig: a request takes prompt + max_tokens from it while it runs, admission waits in
+    lane_host.zig when it does not fit), limit 215 GB, thinking on at effort High. Needles found to 927k tokens.
+  - Engine on v1.0.4: 119/119 build steps, `zig build test` passes with the pool. `zig build test-golden` not yet
+    rerun after the pool (run it while the server is down: memory).
   - Vision checked against mlx-vlm (`evidence/2026-10-09-native-vision-1.0.3.md`).
   - Quality suite and decode ruler complete, thinking on (`evidence/2026-10-10-thinking-on/`) and off
     (`evidence/2026-10-09-quality.md`); `python3 -m mac quality [--thinking 32768]` reruns them. The user's hermes agent works

@@ -14,7 +14,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILES = ("chat", "reference", "long")
+PROFILES = ("chat", "reference")
 MAX_CONTEXT = 1048576                # the checkpoint's max_position_embeddings
 # flags `serve_args` builds itself; EXTRA_ARGS may not set them (the parser keeps the last value); TensorFold's parser
 # takes unambiguous prefixes, so any prefix of these is refused too

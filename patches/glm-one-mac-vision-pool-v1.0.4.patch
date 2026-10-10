@@ -268,7 +268,7 @@ index 815b300..f09f264 100644
  pub const glm_kda_prompt = @embedFile("glm_kda_prompt.metal");
  /// GLM-5.3-Flash speed-up mode's exchange kernels (families/glm/ep.zig).
 diff --git a/zig/src/core/engine_api.zig b/zig/src/core/engine_api.zig
-index 3ffe291..d863687 100644
+index 3ffe291..e8d667d 100644
 --- a/zig/src/core/engine_api.zig
 +++ b/zig/src/core/engine_api.zig
 @@ -9,6 +9,9 @@ pub const Id = u64;
@@ -313,7 +313,7 @@ index 3ffe291..d863687 100644
  pub const Reason = enum { stop, length, cancelled, failed };
  
  /// What a finished reply's rounds did, for its runtime fields and /metrics.
-@@ -127,6 +153,10 @@ pub const Info = struct {
+@@ -127,6 +153,18 @@ pub const Info = struct {
      plain_only: bool = false,
      /// The immutable retained-prefix plan applied at startup, not a process memory limit or current cache occupancy.
      prompt_cache_plan: ?PromptCachePlan = null,
@@ -321,10 +321,18 @@ index 3ffe291..d863687 100644
 +    vision: ?Vision = null,
 +    /// The engine decodes greedily only: the server serves a sampled request greedily instead of failing it.
 +    greedy_only: bool = false,
++    /// Whether a request's caches fit now beside the running streams' (a shared cache pool); null: a free lane is enough.
++    /// A request that does not fit waits in the queue, in order, until enough streams leave.
++    admit: ?Admit = null,
++};
++
++pub const Admit = struct {
++    ctx: *anyopaque,
++    fits: *const fn (ctx: *anyopaque, prompt: u32, max_tokens: u32) bool,
  };
  
  pub const PromptCachePlan = struct {
-@@ -169,6 +199,8 @@ pub const Open = struct {
+@@ -169,6 +207,8 @@ pub const Open = struct {
      /// --device and --segments (CUDA); null: the backend's environment fallback, then its default.
      device: ?u32 = null,
      segments: ?u32 = null,
@@ -334,7 +342,7 @@ index 3ffe291..d863687 100644
  
  /// An opened engine; ``close`` stops its thread and frees its backend.
 diff --git a/zig/src/core/lane_host.zig b/zig/src/core/lane_host.zig
-index 2b0e8e2..d90e1bb 100644
+index 2b0e8e2..75ba472 100644
 --- a/zig/src/core/lane_host.zig
 +++ b/zig/src/core/lane_host.zig
 @@ -16,6 +16,11 @@ const Reason = api.Reason;
@@ -367,7 +375,21 @@ index 2b0e8e2..d90e1bb 100644
          }
      };
  
-@@ -335,7 +340,7 @@ pub const LaneHost = struct {
+@@ -325,6 +330,13 @@ pub const LaneHost = struct {
+             h.unlock();
+             return false;
+         }
++        if (h.info_.admit) |a| { // a shared cache pool: the next request waits for room (always there when idle)
++            const r = h.queued.items[0].request;
++            if (h.core.activeCount() > 0 and !a.fits(a.ctx, @intCast(r.prompt.len), r.max_tokens)) {
++                h.unlock();
++                return false;
++            }
++        }
+         const job = h.queued.orderedRemove(0);
+         h.admitted.append(h.gpa, job) catch {
+             h.unlock();
+@@ -335,7 +347,7 @@ pub const LaneHost = struct {
          const r = job.request;
          var reuse: lanes.stream.Reuse = .{};
          // the entry stays alive until the backend restores it: nothing keeps between here and this stream's own pass
@@ -376,7 +398,7 @@ index 2b0e8e2..d90e1bb 100644
              job.entry = l.entry;
              job.kept0 = store.counts.kept;
              job.marks = l.marks;
-@@ -358,6 +363,7 @@ pub const LaneHost = struct {
+@@ -358,6 +370,7 @@ pub const LaneHost = struct {
              .loop_guard = r.loop_guard,
              .chunks = r.chunks,
              .reuse = reuse,
@@ -424,10 +446,39 @@ index 3619e9a..9e9dfad 100644
          try s.context.appendSlice(gpa, spec.prompt);
          return s;
 diff --git a/zig/src/families/glm/backend.zig b/zig/src/families/glm/backend.zig
-index 663132b..3540682 100644
+index 663132b..4a566eb 100644
 --- a/zig/src/families/glm/backend.zig
 +++ b/zig/src/families/glm/backend.zig
-@@ -83,6 +83,11 @@ pub const Backend = struct {
+@@ -59,6 +59,17 @@ pub const Backend = struct {
+         };
+     }
+ 
++    /// The cache tokens a stream of `prompt` and `max_new` tokens can reach: its prompt, its reply, a last window.
++    fn need(prompt: usize, max_new: usize) u32 {
++        return @intCast(@min(prompt + max_new + st.max_rows + 1, std.math.maxInt(u32)));
++    }
++
++    /// The lane host's admission check: whether a request's caches fit in the pool beside the running streams'.
++    pub fn fits(ptr: *anyopaque, prompt: u32, max_new: u32) bool {
++        const b = self(ptr);
++        return b.sl.fits(need(prompt, max_new));
++    }
++
+     fn self(ptr: *anyopaque) *Backend {
+         return @ptrCast(@alignCast(ptr));
+     }
+@@ -74,15 +85,21 @@ pub const Backend = struct {
+         if (s.sampling) |p| if (p.temperature > 0) return error.GreedyOnly;
+         const prompt = s.prompt();
+         if (prompt.len == 0) return error.EmptyPrompt;
+-        if (prompt.len + s.max_new + st.max_rows + 1 > e.s.cap) return error.ContextFull;
++        if (prompt.len + s.max_new + st.max_rows + 1 > b.sl.capacity()) return error.ContextFull;
+         const i = b.sl.free() orelse return error.NoFreeSlot;
+         try b.by.put(b.gpa, s, i);
++        try b.sl.reserve(i, need(prompt.len, s.max_new)); // pooled: its share of the MLA pool (admission checked it fits)
+         b.words.clearRetainingCapacity();
+         try b.words.appendSlice(b.gpa, &.{ i, @intFromBool(s.drafts) });
+         try b.words.appendSlice(b.gpa, prompt);
          try mirror.send(e, .begin, b.words.items);
          try b.sl.begin(i, prompt, s.drafts);
          s.cached = 0;
@@ -439,6 +490,15 @@ index 663132b..3540682 100644
          var at: u32 = 0;
          if (s.reuse.saved) |saved| { // a kept state of this prompt's prefix: the pass starts there
              const snap: *snapshot.Snap = @ptrCast(@alignCast(saved));
+@@ -195,7 +212,7 @@ pub const Backend = struct {
+             const i = try b.slotOf(w.stream);
+             const at = b.sl.length(i);
+             for (w.positions, 0..) |p, r| if (p != at + r + 1) return error.PositionMismatch;
+-            if (w.held > b.sl.slots[i].held_n or at + w.rows() + 1 > b.sl.e.s.cap) return error.WindowOutOfStep;
++            if (w.held > b.sl.slots[i].held_n or at + w.rows() + 1 > b.sl.slots[i].s.cap) return error.WindowOutOfStep;
+             total += w.rows();
+             try b.wins.append(b.gpa, .{ .slot = i, .pending = w.pending, .held = w.held, .tokens = w.tokens });
+         }
 diff --git a/zig/src/families/glm/checks.zig b/zig/src/families/glm/checks.zig
 index 1ec678d..54885d4 100644
 --- a/zig/src/families/glm/checks.zig
@@ -1181,7 +1241,7 @@ index 42e9f1d..582f5f8 100644
      fwd.rms(x, e, h, m.hnorm, p.m_eh.at(@as(usize, D) * 2), M, D, D, 2 * D, c.eps);
      qmm(p, e, p.m_eh, m.eh_proj, p.m_x, M);
 diff --git a/zig/src/families/glm/slots.zig b/zig/src/families/glm/slots.zig
-index 4bd4caa..8418791 100644
+index 4bd4caa..28793d0 100644
 --- a/zig/src/families/glm/slots.zig
 +++ b/zig/src/families/glm/slots.zig
 @@ -8,6 +8,8 @@ const prompt_mod = @import("prompt.zig");
@@ -1193,7 +1253,50 @@ index 4bd4caa..8418791 100644
  
  /// One stream's rows in a shared window: its pending token, then the drafts the slot holds, then host drafts.
  pub const Win = struct { slot: u32, pending: u32, held: u32, tokens: []const u32 };
-@@ -41,6 +43,8 @@ pub const Slots = struct {
+@@ -27,6 +29,42 @@ pub const Slot = struct {
+     rows: u32 = 0, // the last window's rows until a keep settles them (0: settled)
+     width: u32 = 0, // the last window's rows
+     seen: u64 = 0, // the window that last ran this slot's rows
++    region: ?Region = null, // pooled: this stream's share of the MLA pool
++};
++
++/// A stream's span of the MLA pool, in blocks of `Pool.block` tokens.
++pub const Region = struct { start: u32, blocks: u32 };
++
++/// One MLA cache for the whole window (the engine's own, `--context` tokens), shared out among the running streams:
++/// each takes a contiguous region for its prompt and max_tokens when it begins and gives it back when it leaves, so
++/// one stream alone can use the full window and several split it. The kernels see a region as a cache of its size.
++pub const Pool = struct {
++    base: [st.max_mla]st.Mla, // the engine's caches, `cap` tokens
++    blocks: u32,
++    kpool: u32,
++
++    pub const block: u32 = 256; // tokens; a multiple of the indexer's pooling width
++
++    /// The tokens a region of `n` blocks holds: its last pooling block keeps the cache's extra pooled entry.
++    fn tokens(p: *const Pool, n: u32) u32 {
++        return n * block - p.kpool;
++    }
++
++    /// The blocks `tokens` take.
++    fn need(p: *const Pool, tokens_: u32) u32 {
++        return (tokens_ + p.kpool + block - 1) / block;
++    }
++
++    /// The caches of a region: each part offset into the pool's.
++    fn caches(p: *const Pool, c: anytype, r: Region, out: []st.Mla) void {
++        const t0: usize = @as(usize, r.start) * block;
++        for (out, p.base[0..out.len]) |*m, b| m.* = .{
++            .keys = b.keys.at(t0 * c.kv_lora * 2),
++            .ik = b.ik.at(t0 * c.i_dim * 2),
++            .ig = b.ig.at(t0 * c.i_dim * 2),
++            .pool = b.pool.at(t0 / p.kpool * c.i_dim * 2),
++        };
++    }
+ };
+ 
+ pub const Slots = struct {
+@@ -41,30 +79,93 @@ pub const Slots = struct {
      lasts: Ref, // bf16 [max_rows, hidden]: each drafting stream's last absorbed row (m_x), gathered
      picks: Ref, // u32 [max_rows]: a draft level's picks, a stream each
      open: ?Open = null, // keeps and drafts encode here; the next window commits them with its forward
@@ -1202,7 +1305,86 @@ index 4bd4caa..8418791 100644
      windows: u64 = 0,
      log: bool = false, // GLM_WINDOWS=1: each window's streams, rows, GPU time and the GPU's idle gap before it
      last_end: f64 = 0,
-@@ -65,6 +69,7 @@ pub const Slots = struct {
+     digest: u64 = 0, // the last window's picks hashed: a pair's ranks compare theirs
++    pool: ?Pool = null, // one Mac: the streams share the engine's MLA caches (GLM_POOL=0: a full window each)
+ 
+     const Open = struct { cb: mtl.CommandBuffer, enc: mtl.ComputeEncoder, pool: mtl.objc.Pool };
+ 
+     /// `n` slots: the engine's caches first (no generate while they serve), the rest sharing its projections.
++    /// Pooled, the others hold KDA states only and every slot takes a region of the engine's MLA caches as it begins.
+     pub fn init(gpa: std.mem.Allocator, e: *Engine, n: u32) !Slots {
++        const pooled = pooledOn(e);
+         const slots = try gpa.alloc(Slot, @max(n, 1));
+         errdefer gpa.free(slots);
+         for (slots, 0..) |*slot, i| slot.* = .{
+-            .s = if (i == 0) e.s else try st.initState(&e.arena, &e.c, e.s.cap, &e.s),
++            .s = if (i == 0) e.s else try st.initState(&e.arena, &e.c, if (pooled) 0 else e.s.cap, &e.s),
+             .held = try e.arena.buffer(st.max_rows * 4),
+             .last = try e.arena.buffer(@as(usize, e.c.hidden) * 2),
+         };
+         const plane = @as(usize, st.max_rows) * e.c.hidden * 2;
+-        return .{ .gpa = gpa, .e = e, .slots = slots, .log = std.c.getenv("GLM_WINDOWS") != null, .rows = try e.arena.buffer(plane), .ids = try e.arena.buffer(st.max_rows * 4), .lasts = try e.arena.buffer(plane), .picks = try e.arena.buffer(st.max_rows * 4) };
++        var sl: Slots = .{ .gpa = gpa, .e = e, .slots = slots, .log = std.c.getenv("GLM_WINDOWS") != null, .rows = try e.arena.buffer(plane), .ids = try e.arena.buffer(st.max_rows * 4), .lasts = try e.arena.buffer(plane), .picks = try e.arena.buffer(st.max_rows * 4) };
++        if (pooled) {
++            sl.pool = .{ .base = e.s.mla, .blocks = e.s.cap / Pool.block, .kpool = e.c.kpool };
++            std.log.info("glm: {d} streams share one {d}-token MLA pool", .{ slots.len, sl.capacity() });
++        }
++        return sl;
++    }
++
++    /// Whether the slots share one MLA pool: on one Mac (a pair's ranks mirror slot commands), unless GLM_POOL=0.
++    pub fn pooledOn(e: *const Engine) bool {
++        if (e.ep != null or e.followsPeer()) return false;
++        const v = std.c.getenv("GLM_POOL") orelse return true;
++        return !std.mem.eql(u8, std.mem.span(v), "0");
++    }
++
++    /// The most tokens one stream's caches hold: the pool's, or a slot's own window.
++    pub fn capacity(sl: *const Slots) u32 {
++        const p = sl.pool orelse return sl.e.s.cap;
++        return p.tokens(p.blocks);
++    }
++
++    /// The first free run of `n` blocks in the pool, or null.
++    fn findRun(sl: *const Slots, n: u32) ?u32 {
++        const p = sl.pool.?;
++        var at: u32 = 0;
++        while (at + n <= p.blocks) {
++            var next: ?u32 = null; // the end of the first region overlapping [at, at + n)
++            for (sl.slots) |s| if (s.region) |r| if (r.start < at + n and at < r.start + r.blocks) {
++                next = @max(next orelse 0, r.start + r.blocks);
++            };
++            if (next) |end| at = end else return at;
++        }
++        return null;
++    }
++
++    /// Whether a stream of `tokens` could take its region now (true when no pool, or when it can never fit: the
++    /// prefill then refuses it as too long).
++    pub fn fits(sl: *const Slots, tokens: u32) bool {
++        const p = sl.pool orelse return true;
++        if (tokens > sl.capacity()) return true;
++        return sl.findRun(p.need(tokens)) != null;
++    }
++
++    /// Slot `i`'s region for `tokens` of caches (pooled; before `begin`).
++    pub fn reserve(sl: *Slots, i: u32, tokens: u32) !void {
++        const p = sl.pool orelse return;
++        if (i >= sl.slots.len or sl.slots[i].used or sl.slots[i].region != null) return error.SlotOutOfStep;
++        if (tokens > sl.capacity()) return error.ContextFull;
++        const n = p.need(tokens);
++        const start = sl.findRun(n) orelse return error.PoolFull;
++        const slot = &sl.slots[i];
++        slot.region = .{ .start = start, .blocks = n };
++        p.caches(&sl.e.c, slot.region.?, slot.s.mla[0..mlaCount(sl.e)]);
++        slot.s.cap = p.tokens(n);
++    }
++
++    fn mlaCount(e: *const Engine) usize {
++        return e.c.countKind(.mla) + @as(u32, if (e.c.mtp > 0) 1 else 0);
+     }
+ 
+     pub fn deinit(sl: *Slots, gpa: std.mem.Allocator) void {
          var it = sl.snaps.valueIterator();
          while (it.next()) |snap| freeSnap(gpa, snap.*);
          sl.snaps.deinit(gpa);
@@ -1210,7 +1392,27 @@ index 4bd4caa..8418791 100644
          gpa.free(sl.slots);
      }
  
-@@ -231,6 +236,9 @@ pub const Slots = struct {
+@@ -101,7 +202,7 @@ pub const Slots = struct {
+     pub fn probe(sl: *Slots) !u64 {
+         var toks: [4096 + 40 + 7]u32 = undefined; // a full chunk past the sparse index's reach, a middle one, a short one
+         for (&toks, 0..) |*t, i| t.* = @intCast(1000 + i * 7919 % 50000);
+-        const len: u32 = @intCast(@min(toks.len, sl.e.s.cap -| (st.max_rows + 2)));
++        const len: u32 = @intCast(@min(toks.len, sl.capacity() -| (st.max_rows + 2)));
+         try sl.begin(0, toks[0..len], true);
+         defer sl.release(0);
+         var at: u32 = 0;
+@@ -197,7 +298,9 @@ pub const Slots = struct {
+     /// A new stream in slot `i`: its prompt into the engine's prompt ids, its caches cleared.
+     pub fn begin(sl: *Slots, i: u32, prompt: []const u32, drafts: bool) !void {
+         if (i >= sl.slots.len or sl.slots[i].used) return error.SlotOutOfStep;
+-        if (prompt.len == 0 or prompt.len + st.max_rows + 1 > sl.e.s.cap) return error.ContextFull;
++        if (prompt.len == 0 or prompt.len + st.max_rows + 1 > sl.capacity()) return error.ContextFull;
++        if (sl.pool != null and sl.slots[i].region == null) try sl.reserve(i, @intCast(prompt.len + st.max_rows + 1));
++        if (prompt.len + st.max_rows + 1 > sl.slots[i].s.cap) return error.ContextFull;
+         sl.settleAll(); // the prompt pass overwrites the projections a window's keep replays
+         try sl.flush();
+         sl.e.sync();
+@@ -231,6 +334,9 @@ pub const Slots = struct {
          const pool = mtl.objc.Pool.push();
          defer pool.pop();
          var x = sl.ctx(slot);
@@ -1220,7 +1422,7 @@ index 4bd4caa..8418791 100644
          const b = e.begin();
          const ids = e.prompt_ids.at(@as(usize, at) * 4);
          const next = e.prompt_ids.at(@as(usize, at + 1) * 4);
-@@ -398,6 +406,35 @@ pub const Slots = struct {
+@@ -398,12 +504,42 @@ pub const Slots = struct {
      }
  
      /// The stream in slot `i` left; once every slot is free, pending work commits on this thread (its pool's owner).
@@ -1256,6 +1458,13 @@ index 4bd4caa..8418791 100644
      pub fn release(sl: *Slots, i: u32) void {
          if (i >= sl.slots.len) return;
          const slot = &sl.slots[i];
+         slot.used = false;
+         slot.rows = 0;
+         slot.held_n = 0;
++        slot.region = null; // pooled: its caches go back to the pool (the GPU's reads end before the next writer's)
+         for (sl.slots) |s| if (s.used) return;
+         sl.flush() catch |err| std.log.err("glm: the slots' last command buffer failed: {s}", .{@errorName(err)});
+     }
 diff --git a/zig/src/families/glm/vision.zig b/zig/src/families/glm/vision.zig
 new file mode 100644
 index 0000000..5e815ad
@@ -1813,10 +2022,21 @@ index 4b6e0e7..6758d72 100644
      return w;
  }
 diff --git a/zig/src/native/glm_host.zig b/zig/src/native/glm_host.zig
-index ba0a6e5..e52e784 100644
+index ba0a6e5..b189000 100644
 --- a/zig/src/native/glm_host.zig
 +++ b/zig/src/native/glm_host.zig
-@@ -76,8 +76,9 @@ fn learnedStates(gpa: Allocator, eng: *const ge.Engine, sl: *glm.slots.Slots, ro
+@@ -41,8 +41,9 @@ fn words(_: ?*anyopaque, err: anyerror) ?[]const u8 {
+ }
+ 
+ /// Streams whose caches fit beside the weights under the 70% load limit, at most `want` (`fixed`: all of them or none).
++/// Pooled, a stream past the first adds its KDA states only: the MLA caches are the engine's, shared.
+ fn fit(eng: *const ge.Engine, want: u32, fixed: bool) !u32 {
+-    const per = glm.state.stateBytes(&eng.c, eng.s.cap, true) + 64 * 1024;
++    const per = glm.state.stateBytes(&eng.c, if (glm.slots.Slots.pooledOn(eng)) 0 else eng.s.cap, true) + 64 * 1024;
+     const used = eng.w.bytes + eng.arena.bytes;
+     const limit = ge.Engine.loadLimit();
+     const room: u64 = if (limit > used) (limit - used) / per else 0;
+@@ -76,8 +77,9 @@ fn learnedStates(gpa: Allocator, eng: *const ge.Engine, sl: *glm.slots.Slots, ro
  }
  
  /// A GLM-5.3-Flash checkpoint served: `window` tokens of cache a stream, warmed first (the pair: `speed_up`).
@@ -1828,16 +2048,16 @@ index ba0a6e5..e52e784 100644
      errdefer eng.deinit();
      var toks: [96]u32 = undefined;
      for (&toks, 0..) |*t, i| t.* = @intCast(1000 + i);
-@@ -99,7 +100,7 @@ pub fn open(gpa: Allocator, io: std.Io, dir: []const u8, window: u32, speed_up:
+@@ -99,7 +101,7 @@ pub fn open(gpa: Allocator, io: std.Io, dir: []const u8, window: u32, speed_up:
      h.wall = .{ .io = io };
      h.core = lanes.Engine.init(gpa, &h.cfg, h.back.backend(), h.wall.clock());
      errdefer h.core.deinit();
 -    h.host = api.LaneHost.init(gpa, io, &h.core, .{ .name = "glm-zig", .lanes = n, .context_window = window, .prefill_step = eng.chunk_rows });
-+    h.host = api.LaneHost.init(gpa, io, &h.core, .{ .name = "glm-zig", .lanes = n, .context_window = window, .prefill_step = eng.chunk_rows, .greedy_only = true, .vision = if (eng.vision) |v| .{ .ctx = h, .prepare = prepareImage, .image_token = v.c.image_token, .image_tokens = eng.vision_limits.image_tokens, .max_images = eng.vision_limits.max_images } else null });
++    h.host = api.LaneHost.init(gpa, io, &h.core, .{ .name = "glm-zig", .lanes = n, .context_window = window, .prefill_step = eng.chunk_rows, .greedy_only = true, .admit = if (h.slots.pool != null) .{ .ctx = &h.back, .fits = glm.backend.Backend.fits } else null, .vision = if (eng.vision) |v| .{ .ctx = h, .prepare = prepareImage, .image_token = v.c.image_token, .image_tokens = eng.vision_limits.image_tokens, .max_images = eng.vision_limits.max_images } else null });
      h.cache = null;
      const budget = cacheBudget(eng, cache_gib);
      if (!eng.followsPeer() and budget > 0) {
-@@ -125,6 +126,13 @@ pub fn open(gpa: Allocator, io: std.Io, dir: []const u8, window: u32, speed_up:
+@@ -125,6 +127,13 @@ pub fn open(gpa: Allocator, io: std.Io, dir: []const u8, window: u32, speed_up:
      return h;
  }
  

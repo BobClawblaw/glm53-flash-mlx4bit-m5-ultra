@@ -1,0 +1,5 @@
+info: glm: 3 streams share one 1048572-token MLA pool
+info: GLM-5.3-Flash loaded in 22.5 s (180.6 GB of weights), context 1048576 tokens, 3 streams
+[tensorfold] serving GLM-5.3-Flash-MLX-4bit at http://0.0.0.0:8888/v1 (sampling: greedy; drafts: on; context: 1048576; loaded in 23.0s)
+200.1 GiB wired
+memory: 26.9 GiB free, 1838 MB swap used
