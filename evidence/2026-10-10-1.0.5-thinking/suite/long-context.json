@@ -1,0 +1,168 @@
+{
+ "name": "long-context",
+ "score": 0.9818181818181818,
+ "cases": 55,
+ "passed": 54,
+ "seconds": 1158.695886850357,
+ "notes": [
+  "needles 14/15 to 200k (missed 200k@0.5), facts 10/10@25k, 10/10@51k, 10/10@102k, 10/10@200k, slowest prefill 564 tok/s"
+ ],
+ "details": {
+  "needles": [
+   {
+    "tokens": 6389,
+    "depth": 0.1,
+    "found": true,
+    "seconds": 3.704318708041683,
+    "prefill_tok_s": 1724.7436043043917,
+    "reply": "74335"
+   },
+   {
+    "tokens": 6391,
+    "depth": 0.5,
+    "found": true,
+    "seconds": 3.7864604169735685,
+    "prefill_tok_s": 1687.8560175490177,
+    "reply": "74335"
+   },
+   {
+    "tokens": 6417,
+    "depth": 0.9,
+    "found": true,
+    "seconds": 3.9313395409844816,
+    "prefill_tok_s": 1632.2680687084744,
+    "reply": "74335"
+   },
+   {
+    "tokens": 25434,
+    "depth": 0.1,
+    "found": true,
+    "seconds": 14.84259341598954,
+    "prefill_tok_s": 1713.581938625403,
+    "reply": "74335"
+   },
+   {
+    "tokens": 25449,
+    "depth": 0.5,
+    "found": true,
+    "seconds": 14.612492457963526,
+    "prefill_tok_s": 1741.5920024055024,
+    "reply": "74335"
+   },
+   {
+    "tokens": 25465,
+    "depth": 0.9,
+    "found": true,
+    "seconds": 14.457208374980837,
+    "prefill_tok_s": 1761.4050610260886,
+    "reply": "74335"
+   },
+   {
+    "tokens": 50980,
+    "depth": 0.1,
+    "found": true,
+    "seconds": 31.42201554100029,
+    "prefill_tok_s": 1622.429342047773,
+    "reply": "74335"
+   },
+   {
+    "tokens": 51053,
+    "depth": 0.5,
+    "found": true,
+    "seconds": 31.03918016597163,
+    "prefill_tok_s": 1644.7921538845796,
+    "reply": "74335"
+   },
+   {
+    "tokens": 51003,
+    "depth": 0.9,
+    "found": true,
+    "seconds": 30.161479000002146,
+    "prefill_tok_s": 1690.9979779173418,
+    "reply": "74335"
+   },
+   {
+    "tokens": 102080,
+    "depth": 0.02,
+    "found": true,
+    "seconds": 59.89437620900571,
+    "prefill_tok_s": 1704.3336363298038,
+    "reply": "74335"
+   },
+   {
+    "tokens": 102122,
+    "depth": 0.5,
+    "found": true,
+    "seconds": 59.294043125002645,
+    "prefill_tok_s": 1722.2977995396302,
+    "reply": "7-4-3-3-5"
+   },
+   {
+    "tokens": 102085,
+    "depth": 0.98,
+    "found": true,
+    "seconds": 61.79131891706493,
+    "prefill_tok_s": 1652.0929119026646,
+    "reply": "74335"
+   },
+   {
+    "tokens": 200365,
+    "depth": 0.02,
+    "found": true,
+    "seconds": 117.5644845829811,
+    "prefill_tok_s": 1704.2987149624716,
+    "reply": "74335"
+   },
+   {
+    "tokens": 200464,
+    "depth": 0.5,
+    "found": false,
+    "seconds": 355.1670251250034,
+    "prefill_tok_s": 564.4217672782132,
+    "reply": "The document does not contain any mention of a blue door or "
+   },
+   {
+    "tokens": 200415,
+    "depth": 0.98,
+    "found": true,
+    "seconds": 128.66090829099994,
+    "prefill_tok_s": 1557.699247285816,
+    "reply": "7-4-3-3-5"
+   }
+  ],
+  "facts": [
+   {
+    "tokens": 25561,
+    "recalled": 10,
+    "of": 10,
+    "seconds": 19.27934104204178,
+    "prefill_tok_s": 1325.823322709009,
+    "reply": "Avery: 563\nBlake: 986\nCasey: 673\nDevin: 977\nEmery: 899\nFinley: 576\nHarper: 562\nJordan: 620\nKendall: 975\nMorgan: 701"
+   },
+   {
+    "tokens": 51108,
+    "recalled": 10,
+    "of": 10,
+    "seconds": 30.03960250003729,
+    "prefill_tok_s": 1701.354070844864,
+    "reply": "Avery: 563\nBlake: 986\nCasey: 673\nDevin: 977\nEmery: 899\nFinley: 576\nHarper: 562\nJordan: 620\nKendall: 975\nMorgan: 701"
+   },
+   {
+    "tokens": 102248,
+    "recalled": 10,
+    "of": 10,
+    "seconds": 59.634728542063385,
+    "prefill_tok_s": 1714.5713999163981,
+    "reply": "Avery: 563\nBlake: 986\nCasey: 673\nDevin: 977\nEmery: 899\nFinley: 576\nHarper: 562\nJordan: 620\nKendall: 975\nMorgan: 701"
+   },
+   {
+    "tokens": 200650,
+    "recalled": 10,
+    "of": 10,
+    "seconds": 119.38025212509092,
+    "prefill_tok_s": 1680.7637480087722,
+    "reply": "Avery: 563\nBlake: 986\nCasey: 673\nDevin: 977\nEmery: 899\nFinley: 576\nHarper: 562\nJordan: 620\nKendall: 975\nMorgan: 701"
+   }
+  ]
+ }
+}

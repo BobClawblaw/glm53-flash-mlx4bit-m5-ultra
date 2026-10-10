@@ -1,7 +1,7 @@
 # Notes for agents working on this recipe
 
-GLM-5.3-Flash MLX 4-bit on one 256 GB M5 Ultra, served by TensorFold's native engine (v1.0.4, `d4fc1964`) with
-`patches/glm-one-mac-vision-pool-v1.0.4.patch`. See README.md for use, `evidence/` for measurements. Published (see
+GLM-5.3-Flash MLX 4-bit on one 256 GB M5 Ultra, served by TensorFold's native engine (v1.0.5, `bec00ae6`) with
+`patches/glm-one-mac-vision-pool-v1.0.5.patch`. See README.md for use, `evidence/` for measurements. Published (see
 below).
 
 ## State (2026-10-10)
@@ -12,11 +12,13 @@ below).
   - Defaults: port 8888, the full 1,048,576-token window shared by three streams (the patch's MLA pool in
     families/glm/slots.zig: a request takes prompt + max_tokens from it while it runs, admission waits in
     lane_host.zig when it does not fit), limit 215 GB, thinking on at effort High. Needles found to 927k tokens.
-  - Engine on v1.0.4: 119/119 build steps, `zig build test` passes with the pool. `zig build test-golden` not yet
-    rerun after the pool (run it while the server is down: memory).
+  - Engine on v1.0.5: `zig build test` passes, `zig build test-golden` 309/319 with 0 unexpected differences. The
+    patch rewrites upstream's two greedy-refusal tests (stream_preflight_test.zig) for the greedy fallback. Pooled,
+    1.0.5's resident prompt states (MLA prefixes left in their slot) hold their blocks after their stream leaves
+    (`Snap.held`, slots.zig `holdPrefixes`/`evictHeld`); `tools/pool_reuse.py` checks it.
   - Vision checked against mlx-vlm (`evidence/2026-10-09-native-vision-1.0.3.md`).
-  - Quality suite and decode ruler complete, thinking on (`evidence/2026-10-10-thinking-on/`) and off
-    (`evidence/2026-10-09-quality.md`); `python3 -m mac quality [--thinking 32768]` reruns them. The user's hermes agent works
+  - Quality suite and decode ruler complete on 1.0.5, thinking on (`evidence/2026-10-10-1.0.5-thinking/`) and off
+    (`evidence/2026-10-10-1.0.5/`); `python3 -m mac quality [--thinking 32768] [--resume]` reruns them. The user's hermes agent works
     against it (33 requests, all 200).
   - Publishing files: NOTICE, LICENSES/Apache-2.0.txt, CHANGELOG.md, `.github/workflows/ci.yml`.
 - Open:
@@ -25,7 +27,10 @@ below).
     - Posted 2026-10-10: PRs ashhart/TensorFold#580 (load limit), #581 (wiring), #582 (greedy refusal);
       a #565 comment (GLM Metal vision); issues #583 (loader page cache), #584 (prompt-cache question).
   - `response_format` returns 400: the native engine has no structured output.
-  - With thinking on, one 200k needle at 98% depth was missed; thinking off finds it (retrieval: send thinking off).
+  - With thinking on, one 200k needle is missed (98% depth on 1.0.4, 50% on 1.0.5); thinking off finds every one.
+  - A `powermetrics` GPU sampler from another session ran during the 1.0.5 runs; two early rulers had one slow phase
+    each (cause not found), later ones agree.
+  - Candidate upstream PR: the shared pool (with the held prefixes), against main.
   - The image-aware prompt-cache key is not exercised live.
 - The server may be up on 0.0.0.0:8888 (`local.toml`, git-ignored, also turns on the request log).
 
@@ -62,4 +67,6 @@ editing it:
 
 Never edit a pinned patch in place. To move to a new TensorFold release, `git apply --3way` the patch onto a fresh
 worktree at the tag. 1.0.2 to 1.0.3 conflicted in engine_api.zig (Info), lane_host.zig (keep/lookup args), cli.zig
-(apply chain) and build.zig (frameworks).
+(apply chain) and build.zig (frameworks). 1.0.4 to 1.0.5 conflicted in engine_api.zig and stream.zig (logprobs beside
+images), lane_host.zig (lookupRewind), slots.zig (the ring), engine.zig (the load plan moved to load_plan.zig: drop our
+limit), glm_host.zig and metal.zig (open's learn floor), server.zig (keep the greedy fallback).

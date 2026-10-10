@@ -1,0 +1,5 @@
+X 9553 tokens; identical together vs alone: True
+    The secret code for the blue door is 4-1-7-7-2. Section 3 reports that the medieval bookbinding team inspected 762 items during week 1. Section 4 repo
+Z 7231 tokens; identical together vs alone: True
+    The secret code for the blue door is 5-2-6-1-3.  Section 3 reports that the medieval bookbinding team revised 175 items during week 16, noting that ha
+Y 23825 The secret code for the blue door is 8-8-3-0-6. Section 3 reports that the medieval bookbinding team

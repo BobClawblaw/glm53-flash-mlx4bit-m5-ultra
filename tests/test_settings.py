@@ -69,7 +69,7 @@ class Defaults(unittest.TestCase):
     def test_server_env_carries_the_load_limit(self):
         s = load(extra_env="TF_X=1 TF_Y=a=b", request_log="~/req.log", memory_limit_gb="190")
         env = s.server_env()
-        self.assertEqual(env["TENSORFOLD_MEMORY_LIMIT_GB"], "190")
+        self.assertEqual(env["GLM_LOAD_LIMIT_GB"], "190")
         self.assertEqual(env["HF_HUB_OFFLINE"], "1")
         self.assertEqual(env["TF_Y"], "a=b")
         self.assertTrue(env["TENSORFOLD_REQUEST_LOG"].endswith("/req.log"))
@@ -103,7 +103,7 @@ class Refusals(unittest.TestCase):
 
     def test_memory_settings(self):
         self.refuse("outside", memory_limit_gb="0")
-        self.refuse("use memory_limit_gb", extra_env="TENSORFOLD_MEMORY_LIMIT_GB=300")
+        self.refuse("use memory_limit_gb", extra_env="GLM_LOAD_LIMIT_GB=300")
 
     def test_patch_pin(self):
         self.refuse("not a sha256", patch_sha256="abc")

@@ -9,11 +9,9 @@ same_as = ""                              # other repositories whose snapshot at
 
 [engine]
 tensorfold_repo = "https://github.com/ashhart/TensorFold.git"
-tensorfold_sha = "d4fc1964d0637c33e09ddac18aec936f962bb646"     # v1.0.4
+tensorfold_sha = "bec00ae6961a43a9ab73c4fa9338c167b3f82851"     # v1.0.5
 tensorfold_src = "~/github/TensorFold"   # a checkout holding the sha; `build` adds a worktree at it under tf_cache
 # applied to the worktree before the build. Pinned by sha256; never edit it in place, write a new one and re-pin.
-#  - GLM's one-Mac load limit (70% of RAM, 179 GB here) becomes overridable by TENSORFOLD_MEMORY_LIMIT_GB, so the
-#    180.6 GB checkpoint loads on one 256 GB Mac;
 #  - with GLM_RESIDENCY the weights' residency set is requested before their reads, not after, and with GLM_WIRE every
 #    buffer is wired (mlock) before it fills: past ~110 GB of fresh buffers the GPU driver's wired collector otherwise
 #    hands the untouched ones to the compressor (145 GiB seen; with Time Machine's file cache beside it, jetsam then
@@ -22,9 +20,13 @@ tensorfold_src = "~/github/TensorFold"   # a checkout holding the sha; `build` a
 #    decoding and the processor (families/glm/image.zig), data-URL image_url parts expanded to each image's tokens
 #    (server/images.zig), the rows injected over the placeholders' embeddings in the prompt pass.
 #  - a request with a temperature is served greedily (the native GLM engine decodes greedily only), not failed:
-#    clients such as hermes always send one.
-patch = "glm-one-mac-vision-pool-v1.0.4.patch"
-patch_sha256 = "aa38b94990c86afd96d3eab71395a42129fcbf9de6d6fd03bc335376323558b1"
+#    clients such as hermes always send one (stock 1.0.5 refuses it with a 400).
+#  - the streams share one MLA cache pool of the whole window (families/glm/slots.zig): a request takes prompt +
+#    max_tokens from it while it runs, admission waits when it does not fit, and a kept prompt state holds the blocks
+#    under its prefix after its stream leaves until a new request needs them.
+# 1.0.5's own GLM_LOAD_LIMIT_GB carries the one-Mac load limit past 70% of RAM (the panic risk on its log).
+patch = "glm-one-mac-vision-pool-v1.0.5.patch"
+patch_sha256 = "80264a24edd3182dffcba902619fcb72f8d36325faa38160ceff7697af7d30b9"
 zig = "~/.local/zig/zig"                 # Zig 0.17.0 (.zig-version in the checkout)
 zig_cpu = "apple_m1"
 binary = ""                              # a prebuilt tensorfold-native to serve with instead of the pinned build
@@ -49,7 +51,7 @@ thinking = true                  # GLM-5.3 reasons first (reasoning_content); a 
 max_tokens = 32768
 temperature = "0"                # the native GLM engine decodes greedily only: a request at the checkpoint's 1.0 is refused
 prompt_cache_gib = 4             # kept prompt states, bounded so the load stays predictable; -1 the engine's default, 0 off
-learn = false                    # shared prompt prefixes on disk (GLM has it in v1.0.4); learn_dir and learn_gib below
+learn = false                    # shared prompt prefixes on disk (GLM has it since v1.0.4); learn_dir and learn_gib below
 learn_dir = ""                   # "" the engine's ~/.cache/tensorfold/learned
 learn_gib = 32
 keep_warm = 900
@@ -63,7 +65,7 @@ vision_max_images = 4
 api_key = ""
 extra_args = ""
 extra_env = ""
-# memory: the engine refuses a one-Mac load past TENSORFOLD_MEMORY_LIMIT_GB (patched; stock: 70% of RAM). 215 GB holds
+# memory: the engine refuses a one-Mac load past GLM_LOAD_LIMIT_GB (stock 1.0.5; unset: 70% of RAM). 215 GB holds
 # the 180.6 GB of weights, the 1M-token pool, three streams' own states and the kept prompt states; `up` also refuses when free memory is under the
 # engine's floor plus memory_margin_gib, and the watchdog below kills the server before the Mac swaps.
 memory_limit_gb = 215

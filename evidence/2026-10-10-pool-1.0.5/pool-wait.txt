@@ -1,0 +1,4 @@
+during A: {'connections': 2, 'waiting': 1, 'decode_tokens_per_second': 0.0, 'prefill_tokens_per_second': 0.0}
+A (0.0, 2.98, '1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 ', {'prompt_tokens': 29, 'completion_tokens': 240, 'total_tokens': 269, 'prompt_tokens_details': {'cached_tokens': 0}, 'completion_tokens_details': {'reasoning_tokens': 0}})
+B (0.4, 3.09, 'pool ok', {'prompt_tokens': 19, 'completion_tokens': 3, 'total_tokens': 22, 'prompt_tokens_details': {'cached_tokens': 0}, 'completion_tokens_details': {'reasoning_tokens': 0}})
+C (3.09, 3.09, 400, b'{"error": {"message": "This server\'s maximum context length is 1048576 tokens, but the rendered prompt has 14 tokens and requests 1048570 reply tokens, which ex')

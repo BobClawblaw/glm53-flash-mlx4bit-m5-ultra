@@ -1,0 +1,13 @@
+# TensorFold 1.0.5 + glm-one-mac-vision-pool-v1.0.5.patch, the recipe's defaults (python3 -m mac up), 2026-10-10
+# server log at load:
+info: glm: image tower loaded (2.13 GiB with scratch for 4096 image tokens a prompt)
+info: glm: 3 streams share one 1048572-token MLA pool
+info: GLM-5.3-Flash loaded in 21.4 s (180.6 GB of weights), context 1048576 tokens, 3 streams
+[tensorfold] prompt chunks of up to 16,384 tokens, cut at replies 256+ tokens apart
+[tensorfold] serving GLM-5.3-Flash-MLX-4bit at http://0.0.0.0:8888/v1 (sampling: greedy; drafts: on; context: 1048576; loaded in 21.8s)
+# right after load (12:18, vm_stat and the recipe's memguard readings): wired 201.4 GiB, 39.9 GiB free, compressor 6.0 GiB, pressure 1
+# after both suites (14:42):
+30.8 GiB free, compressor 5.2 GiB, swap 1606 MB, pressure 1
+wired 200.5 GiB
+# golden: zig build test-golden: 309/319 equal to the frozen Python answers, 0 unexpected differences
+# unit: zig build test: rc=0

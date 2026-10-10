@@ -2,6 +2,21 @@
 
 ## 2026-10-10
 
+- **TensorFold 1.0.5** (`bec00ae6`) with `patches/glm-one-mac-vision-pool-v1.0.5.patch`. 1.0.5's own
+  `GLM_LOAD_LIMIT_GB` replaces the patched `TENSORFOLD_MEMORY_LIMIT_GB` (the recipe still sets 215), and its faster
+  GLM decode and prompt kernels, out-of-page-cache loads and the prompt cache for prompts under 4,096 tokens come with
+  it. The patch keeps wired loading, vision, the greedy fallback (stock 1.0.5 refuses a temperature with a 400) and
+  the shared pool. 1.0.5 keeps a prompt state's prefix in its stream's slot; in the pool a finished stream's kept
+  states now hold the blocks under their prefixes until a new request needs the room. Golden 309/319 with 0
+  unexpected differences, `zig build test` passes.
+- **Measured on 1.0.5, three streams, 1M pool**: one user 92 / 105 / 99 / 96 tok/s (prose / code / structured /
+  list; the 55 tok/s list phase seen with three streams on 1.0.4 is gone), 101-136 tok/s aggregate at two users and
+  106-124 at three. Prompts read at ~1,700-1,800 tok/s to 200k tokens (810-1,134 on 1.0.4): 200k in 118 s.
+  Quality with thinking on: IFEval 131/121, MMLU 308, GSM8K 248, MGSM 226, long context 54/55; off: IFEval 96/89,
+  MMLU 292, GSM8K 246, MGSM 217, long context 55/55. Tools 57/60 both ways (`evidence/2026-10-10-1.0.5*`,
+  `evidence/2026-10-10-pool-1.0.5/`).
+- **`python3 -m mac quality --resume`** continues an interrupted run: saved checks are not rerun and the report is
+  rebuilt from every saved check.
 - **The full 1,048,576-token window, shared by three streams, by default.** The patch
   (`glm-one-mac-vision-pool-v1.0.4.patch`) keeps one MLA cache pool of the window's size and gives each request a
   slice for its prompt plus `max_tokens` while it runs; a request that does not fit waits for room. One request alone

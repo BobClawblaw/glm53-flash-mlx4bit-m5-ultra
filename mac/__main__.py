@@ -44,9 +44,10 @@ def main(argv: list[str] | None = None) -> int:
     st = sub.add_parser("suite", help="the Spark recipe's quality suite against this server (extra args pass through)")
     st.add_argument("rest", nargs=argparse.REMAINDER)
     qu = sub.add_parser("quality", help="the standard measurement: every suite check and the ruler into evidence/<date>-<label>/")
-    qu.add_argument("--label", required=True, help="the evidence folder's name after the date, e.g. native-1.0.4")
+    qu.add_argument("--label", required=True, help="the evidence folder's name after the date, e.g. native-1.0.5")
     qu.add_argument("--humaneval", action="store_true", help="also HumanEval (needs Docker and the suite's sandbox image)")
     qu.add_argument("--thinking", type=int, default=0, metavar="BUDGET", help="every request with thinking on and BUDGET reasoning tokens (0: off, as the suite sends)")
+    qu.add_argument("--resume", action="store_true", help="continue the newest evidence/*-<label>/: saved checks are not rerun")
     ru = sub.add_parser("ruler", help="the Spark recipe's decode ruler against this server (extra args pass through)")
     ru.add_argument("rest", nargs=argparse.REMAINDER)
     a = ap.parse_args(argv)
@@ -87,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "suite":
             return external.suite(s, [w for w in a.rest if w != "--"])
         elif a.cmd == "quality":
-            return external.quality(s, a.label, a.humaneval, a.thinking)
+            return external.quality(s, a.label, a.humaneval, a.thinking, a.resume)
         elif a.cmd == "ruler":
             return external.ruler(s, [w for w in a.rest if w != "--"])
     except (RuntimeError, subprocess.CalledProcessError) as exc:

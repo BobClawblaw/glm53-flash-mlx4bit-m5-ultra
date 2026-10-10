@@ -1,0 +1,70 @@
+[
+ {
+  "name": "streaming",
+  "score": 1.0,
+  "cases": 4,
+  "passed": 4,
+  "seconds": 14.192355871200562,
+  "notes": [
+   "identical"
+  ],
+  "details": {}
+ },
+ {
+  "name": "multiturn",
+  "score": 1.0,
+  "cases": 8,
+  "passed": 8,
+  "seconds": 9.64258098602295,
+  "notes": [
+   "recalled 8/8 facts"
+  ],
+  "details": {
+   "reply": "Odile, from Lyon.\nCat: Pistache, 7 years old.\nJob: luthier \u2014 violin repair.\nFavourite number: 314.\nTravel: Montreal, 14 November."
+  }
+ },
+ {
+  "name": "stop",
+  "score": 1.0,
+  "cases": 3,
+  "passed": 3,
+  "seconds": 0.7296981811523438,
+  "notes": [
+   "3/3 stopped before the string"
+  ],
+  "details": {}
+ },
+ {
+  "name": "thinking",
+  "score": 1.0,
+  "cases": 10,
+  "passed": 10,
+  "seconds": 8.700361251831055,
+  "notes": [
+   "0 replies without reasoning_content, 0 with think tags in content"
+  ],
+  "details": {}
+ },
+ {
+  "name": "copy",
+  "score": 1.0,
+  "cases": 2,
+  "passed": 2,
+  "seconds": 1.4226980209350586,
+  "notes": [
+   "2/2 byte-identical"
+  ],
+  "details": {}
+ },
+ {
+  "name": "max-tokens",
+  "score": 1.0,
+  "cases": 3,
+  "passed": 3,
+  "seconds": 0.7523598670959473,
+  "notes": [
+   "3/3 exact"
+  ],
+  "details": {}
+ }
+]

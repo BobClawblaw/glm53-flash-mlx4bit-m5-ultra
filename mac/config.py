@@ -174,7 +174,7 @@ class Settings:
     def server_env(self) -> dict[str, str]:
         env = dict(os.environ)
         env.update({"HF_HOME": str(self.hf_cache), "HF_HUB_OFFLINE": "1", "TENSORFOLD_NO_UPDATE_CHECK": "1",
-                    "TENSORFOLD_MEMORY_LIMIT_GB": str(self.memory_limit_gb)})
+                    "GLM_LOAD_LIMIT_GB": str(self.memory_limit_gb)})
         if self.residency:
             env["GLM_RESIDENCY"] = "1"
             env["GLM_WIRE"] = "1"
@@ -329,7 +329,7 @@ def validate(s: Settings) -> None:
     for kv in s.extra_env_pairs:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", kv):
             raise ConfigError(f"extra_env entry {kv!r} is not KEY=VALUE")
-        if kv.split("=", 1)[0] == "TENSORFOLD_MEMORY_LIMIT_GB":
-            raise ConfigError("extra_env sets TENSORFOLD_MEMORY_LIMIT_GB: use memory_limit_gb")
+        if kv.split("=", 1)[0] == "GLM_LOAD_LIMIT_GB":
+            raise ConfigError("extra_env sets GLM_LOAD_LIMIT_GB: use memory_limit_gb")
         if kv.split("=", 1)[0] == "GLM_RESIDENCY":
             raise ConfigError("extra_env sets GLM_RESIDENCY: use residency")

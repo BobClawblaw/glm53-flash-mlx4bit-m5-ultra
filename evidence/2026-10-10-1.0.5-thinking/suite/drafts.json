@@ -1,0 +1,184 @@
+{
+ "name": "drafts",
+ "score": 1.0,
+ "cases": 12,
+ "passed": 12,
+ "seconds": 84.19214177131653,
+ "notes": [
+  "drafted 71 tok/s vs undrafted 59 tok/s"
+ ],
+ "details": {
+  "drafted": [
+   {
+    "prompt": "Explain, in about 150 words, why the sky is blue and sunsets are red.",
+    "sha": "90ede95c8536",
+    "tokens": 199,
+    "tok_s": 37.008093106128946,
+    "text": "The sky is blue because of a phenomenon called Rayleigh scattering. Sunlight contains all colors of the visible spectrum, and when it enters Earth's atmosphere, it collides with gas molecules (mainly nitrogen and oxygen). These molecules scatter shorter wavelengths\u2014blue and violet light\u2014much more strongly than longer wavelengths like red. In fact, scattering intensity is inversely proportional to the fourth power of wavelength, so blue light scatters roughly ten times more than red. Our eyes are also less sensitive to violet, and some violet is absorbed higher in the atmosphere, so the sky appears blue rather than purple.\n\nAt sunset, sunlight travels through much more atmosphere to reach your eyes. Along this long path, most of the blue light is scattered away entirely, leaving the longer-wavelength reds and oranges to pass through directly. That's why the sun and surrounding sky glow in warm red and orange hues, especially when dust or aerosols enhance the effect."
+   },
+   {
+    "prompt": "Write a Python function that parses an ISO-8601 date string and returns the day of the week, with a docstring and two examples.",
+    "sha": "ac61762174ff",
+    "tokens": 431,
+    "tok_s": 55.14521135155992,
+    "text": "```python\nfrom datetime import datetime\n\n\ndef day_of_week(iso_date: str) -> str:\n    \"\"\"\n    Parse an ISO-8601 date string and return the day of the week.\n\n    Args:\n        iso_date: A date string in ISO-8601 format (e.g., \"2024-06-15\").\n\n    Returns:\n        The English name of the day of the week (e.g., \"Saturday\").\n\n    Raises:\n        ValueError: If the input string is not a valid ISO-8601 date.\n\n    Examples:\n        >>> day_of_week(\"2024-06-15\")\n        'Saturday'\n        >>> day_of_week(\"2000-01-01\")\n        'Saturday'\n    \"\"\"\n    return datetime.strptime(iso_date, \"%Y-%m-%d\").strftime(\"%A\")\n\n\nif __name__ == \"__main__\":\n    print(day_of_week(\"2024-06-15\"))   # Saturday\n    print(day_of_week(\"2000-01-01\"))   # Saturday\n```\n\n**How it works:**\n\n- `datetime.strptime(iso_date, \"%Y-%m-%d\")` parses the ISO-8601 date string (e.g., `2024-06-15`) into a `datetime` object, raising a `ValueError` if the format is invalid.\n- `.strftime(\"%A\")` formats that date as the full weekday name (e.g., `Saturday`).\n\n**Notes:**\n\n- If you need to support full ISO-8601 timestamps (with times or time zones, like `2024-06-15T10:30:00+02:00`), you can swap the parsing line for `datetime.fromisoformat(iso_date).strftime(\"%A\")`, available since Python 3.7 (with broader timezone support from 3.11).\n- For locale-independent or non-English day names, consider using `calendar.day_name` with `locale`, or a library like `babel`."
+   },
+   {
+    "prompt": "List five differences between TCP and UDP as a numbered list, one sentence each.",
+    "sha": "10e56d04e65a",
+    "tokens": 142,
+    "tok_s": 91.94256924211034,
+    "text": "1. TCP is connection-oriented, requiring a handshake before data transfer, while UDP is connectionless and sends data without establishing a connection.\n\n2. TCP guarantees reliable delivery of data through acknowledgments and retransmissions, whereas UDP offers no guarantee that packets will arrive.\n\n3. TCP ensures packets arrive in the correct order, while UDP packets may arrive out of order or be lost.\n\n4. TCP has higher overhead due to its headers and error-checking mechanisms, making it slower, while UDP is lightweight and faster.\n\n5. TCP is used for applications requiring accuracy like web browsing, email, and file transfers, while UDP is preferred for speed-sensitive applications like video streaming, gaming, and VoIP."
+   },
+   {
+    "prompt": "Translate to French: 'The committee postponed the vote until the engineers had finished their report.'",
+    "sha": "0f5205862444",
+    "tokens": 220,
+    "tok_s": 94.12015522592894,
+    "text": "**French translation:**\n\n\u00ab Le comit\u00e9 a report\u00e9 le vote jusqu'\u00e0 ce que les ing\u00e9nieurs aient termin\u00e9 leur rapport. \u00bb\n\n**Notes on the translation:**\n- **a report\u00e9** \u2014 pass\u00e9 compos\u00e9 of *reporter* (to postpone)\n- **jusqu'\u00e0 ce que** \u2014 \"until,\" which requires the **subjunctive** mood in French\n- **aient termin\u00e9** \u2014 past subjunctive (*subjonctif pass\u00e9*), used because the engineers' finishing the report occurred before the main action's reference point\n\nAn alternative phrasing: \u00ab Le comit\u00e9 a diff\u00e9r\u00e9 le vote jusqu'\u00e0 ce que les ing\u00e9nieurs eussent achev\u00e9 leur rapport \u00bb \u2014 but this uses the literary *plus-que-parfait du subjonctif* and would sound very formal or archaic in modern French."
+   },
+   {
+    "prompt": "Write a bash script that renames every .jpeg file in a directory tree to .jpg, skipping files whose target name exists, and prints a summary.",
+    "sha": "f61465f98f84",
+    "tokens": 722,
+    "tok_s": 82.31476725886041,
+    "text": "# JPEG to JPG Renamer\n\nHere's a robust script that handles spaces in filenames, avoids overwriting existing files, and prints a summary:\n\n```bash\n#!/usr/bin/env bash\n#\n# rename-jpeg.sh \u2014 Rename all .jpeg files under a directory tree to .jpg\n# Usage: ./rename-jpeg.sh [directory]   (defaults to current directory)\n\nset -u\n\nroot=\"${1:-.}\"\n\n# Validate the starting directory\nif [[ ! -d \"$root\" ]]; then\n    echo \"Error: '$root' is not a directory\" >&2\n    exit 1\nfi\n\nrenamed=0\nskipped=0\nerrors=0\n\n# Process files safely, even if names contain spaces or newlines\nwhile IFS= read -r -d '' file; do\n    target=\"${file%.*}.jpg\"\n\n    if [[ -e \"$target\" ]]; then\n        echo \"SKIP: '$file' -> '$target' already exists\"\n        ((skipped++))\n        continue\n    fi\n\n    if mv -n -- \"$file\" \"$target\"; then\n        echo \"RENAME: '$file' -> '$target'\"\n        ((renamed++))\n    else\n        echo \"ERROR: failed to rename '$file'\" >&2\n        ((errors++))\n    fi\ndone < <(find \"$root\" -type f -iname '*.jpeg' -print0)\n\n# Summary\necho\necho \"================ Summary ================\"\necho \" Renamed : $renamed\"\necho \" Skipped : $skipped\"\necho \" Errors  : $errors\"\necho \"=========================================\"\n\n# Exit nonzero if anything failed\n((errors == 0)) || exit 1\n```\n\n## Key details\n\n- **`find ... -print0` + `read -d ''`** \u2014 safely handles filenames containing spaces, tabs, or even newlines.\n- **`-iname '*.jpeg'`** \u2014 also catches `.JPEG`, `.Jpeg`, etc. (drop the `i` if you want a case-sensitive match).\n- **`[[ -e \"$target\" ]]`** \u2014 skips the rename if the `.jpg` name is already taken, and reports it.\n- **`mv -n`** \u2014 a second line of defense against overwriting (no-clobber), in case of a race between the check and the move.\n- **`--`** \u2014 protects against filenames that begin with a dash.\n- **`${file%.*}.jpg`** \u2014 strips the extension and appends `.jpg`.\n\n## Example output\n\n```\nRENAME: './photos/vacation.jpeg' -> './photos/vacation.jpg'\nSKIP: './photos/backup.jpeg' -> './photos/backup.jpg' already exists\nRENAME: './my pics/IMG_001.jpeg' -> './my pics/IMG_001.jpg'\n\n================ Summary ================\n Renamed : 2\n Skipped : 1\n Errors  : 0\n=========================================\n```\n\n**Note:** If you want a *dry run* first (very recommended before bulk renames), replace the `mv` line with `echo \"WOULD RENAME: '$file' -> '$target'\"`."
+   },
+   {
+    "prompt": "A train leaves at 09:40 and arrives at 14:05 after a 25-minute stop. What is its moving time? Show the steps briefly.",
+    "sha": "1a0f4c59aa0b",
+    "tokens": 130,
+    "tok_s": 54.64259894604796,
+    "text": "**Step 1: Find total journey time.**\nFrom 09:40 to 14:05:\n- 09:40 \u2192 13:40 = 4 hours\n- 13:40 \u2192 14:05 = 25 minutes\n- Total = 4 h 25 min\n\n**Step 2: Subtract the stop.**\n4 h 25 min \u2212 25 min = **4 hours** of moving time."
+   },
+   {
+    "prompt": "Summarize the plot of a heist film you invent, in exactly four sentences.",
+    "sha": "da1c3b95cc9a",
+    "tokens": 194,
+    "tok_s": 55.82571556837055,
+    "text": "In *The Glass Hour*, a retired safecracker named Vivian Cho is pulled back for one last job when her estranged daughter is blackmailed into stealing a priceless clockwork orb from a Zurich bank vault that only opens during a total solar eclipse. She assembles a crew of specialists\u2014a deaf acoustics expert, a disgraced meteorologist who can predict the eclipse's exact path, and a charming con man who may be playing both sides. The heist unfolds in a breakneck sixty-minute window, but the real twist comes when Vivian discovers the orb contains her late husband's hidden fortune, and the blackmailer is her daughter's secret business partner running an elaborate con of his own. In the end, the crew out-schemes everyone by stealing the vault's entire contents while leaving the orb behind, and Vivian walks away with both the money and her daughter's forgiveness."
+   },
+   {
+    "prompt": "Give a JSON array of three objects, each with keys city, country and population (integer), for three large Asian cities.",
+    "sha": "f154de6642b8",
+    "tokens": 101,
+    "tok_s": 48.62135004394577,
+    "text": "```json\n[\n  {\n    \"city\": \"Tokyo\",\n    \"country\": \"Japan\",\n    \"population\": 13960000\n  },\n  {\n    \"city\": \"Delhi\",\n    \"country\": \"India\",\n    \"population\": 32900000\n  },\n  {\n    \"city\": \"Shanghai\",\n    \"country\": \"China\",\n    \"population\": 24870000\n  }\n]\n```"
+   },
+   {
+    "prompt": "Rewrite this sentence in the passive voice and then in the imperative: 'The engineer calibrates the sensor every morning.'",
+    "sha": "3921253e4a8e",
+    "tokens": 88,
+    "tok_s": 92.99292576395663,
+    "text": "Here are both versions:\n\n**Passive voice:**\n\"The sensor is calibrated by the engineer every morning.\"\n\n**Imperative:**\n\"Calibrate the sensor every morning.\"\n\nNote that the imperative version drops the subject (\"the engineer\") entirely, since imperatives address the listener directly as the implied subject."
+   },
+   {
+    "prompt": "What is 17 * 23? Then subtract 91 and divide by 5. Show each step.",
+    "sha": "2a37855824c4",
+    "tokens": 138,
+    "tok_s": 58.10425397818254,
+    "text": "# Step-by-Step Solution\n\n## Step 1: Multiply 17 \u00d7 23\n$$17 \\times 23 = 391$$\n\n*Breakdown: 17 \u00d7 20 = 340, and 17 \u00d7 3 = 51, so 340 + 51 = 391*\n\n## Step 2: Subtract 91\n$$391 - 91 = 300$$\n\n## Step 3: Divide by 5\n$$300 \\div 5 = 60$$\n\n## Final Answer: **60**"
+   },
+   {
+    "prompt": "Write a haiku about a lighthouse, then explain its syllable count.",
+    "sha": "51bce61f8005",
+    "tokens": 262,
+    "tok_s": 105.87025832589032,
+    "text": "**Haiku:**\n\nSteady beam of light (5)\nGuiding ships through darkened seas (7)\nThe keeper watches (5)\n\n**Syllable Breakdown:**\n\n*Line 1: \"Steady beam of light\" \u2014 5 syllables*\n- Stead-y (2) + beam (1) + of (1) + light (1) = 5\n\n*Line 2: \"Guiding ships through darkened seas\" \u2014 7 syllables*\n- Guid-ing (2) + ships (1) + through (1) + dark-ened (2) + seas (1) = 7\n\n*Line 3: \"The keeper watches\" \u2014 5 syllables*\n- The (1) + keep-er (2) + watch-es (2) = 5\n\nThis follows the traditional haiku structure of 5-7-5 syllables across three lines. The poem also captures a classic haiku spirit: a single vivid image (the lighthouse beam), a sense of nature's vastness (the darkened sea), and a quiet human presence observing it all (the keeper)."
+   },
+   {
+    "prompt": "Name the planets of the solar system in order from the Sun, one per line, and mark the gas giants with an asterisk.",
+    "sha": "ce8ee2eb7b90",
+    "tokens": 26,
+    "tok_s": 72.84636563498466,
+    "text": "Mercury\nVenus\nEarth\nMars\nJupiter *\nSaturn *\nUranus *\nNeptune *"
+   }
+  ],
+  "undrafted": [
+   {
+    "prompt": "Explain, in about 150 words, why the sky is blue and sunsets are red.",
+    "sha": "90ede95c8536",
+    "tokens": 199,
+    "tok_s": 41.11207119551657,
+    "text": "The sky is blue because of a phenomenon called Rayleigh scattering. Sunlight contains all colors of the visible spectrum, and when it enters Earth's atmosphere, it collides with gas molecules (mainly nitrogen and oxygen). These molecules scatter shorter wavelengths\u2014blue and violet light\u2014much more strongly than longer wavelengths like red. In fact, scattering intensity is inversely proportional to the fourth power of wavelength, so blue light scatters roughly ten times more than red. Our eyes are also less sensitive to violet, and some violet is absorbed higher in the atmosphere, so the sky appears blue rather than purple.\n\nAt sunset, sunlight travels through much more atmosphere to reach your eyes. Along this long path, most of the blue light is scattered away entirely, leaving the longer-wavelength reds and oranges to pass through directly. That's why the sun and surrounding sky glow in warm red and orange hues, especially when dust or aerosols enhance the effect."
+   },
+   {
+    "prompt": "Write a Python function that parses an ISO-8601 date string and returns the day of the week, with a docstring and two examples.",
+    "sha": "ac61762174ff",
+    "tokens": 431,
+    "tok_s": 63.78483407150853,
+    "text": "```python\nfrom datetime import datetime\n\n\ndef day_of_week(iso_date: str) -> str:\n    \"\"\"\n    Parse an ISO-8601 date string and return the day of the week.\n\n    Args:\n        iso_date: A date string in ISO-8601 format (e.g., \"2024-06-15\").\n\n    Returns:\n        The English name of the day of the week (e.g., \"Saturday\").\n\n    Raises:\n        ValueError: If the input string is not a valid ISO-8601 date.\n\n    Examples:\n        >>> day_of_week(\"2024-06-15\")\n        'Saturday'\n        >>> day_of_week(\"2000-01-01\")\n        'Saturday'\n    \"\"\"\n    return datetime.strptime(iso_date, \"%Y-%m-%d\").strftime(\"%A\")\n\n\nif __name__ == \"__main__\":\n    print(day_of_week(\"2024-06-15\"))   # Saturday\n    print(day_of_week(\"2000-01-01\"))   # Saturday\n```\n\n**How it works:**\n\n- `datetime.strptime(iso_date, \"%Y-%m-%d\")` parses the ISO-8601 date string (e.g., `2024-06-15`) into a `datetime` object, raising a `ValueError` if the format is invalid.\n- `.strftime(\"%A\")` formats that date as the full weekday name (e.g., `Saturday`).\n\n**Notes:**\n\n- If you need to support full ISO-8601 timestamps (with times or time zones, like `2024-06-15T10:30:00+02:00`), you can swap the parsing line for `datetime.fromisoformat(iso_date).strftime(\"%A\")`, available since Python 3.7 (with broader timezone support from 3.11).\n- For locale-independent or non-English day names, consider using `calendar.day_name` with `locale`, or a library like `babel`."
+   },
+   {
+    "prompt": "List five differences between TCP and UDP as a numbered list, one sentence each.",
+    "sha": "10e56d04e65a",
+    "tokens": 142,
+    "tok_s": 46.843370539492305,
+    "text": "1. TCP is connection-oriented, requiring a handshake before data transfer, while UDP is connectionless and sends data without establishing a connection.\n\n2. TCP guarantees reliable delivery of data through acknowledgments and retransmissions, whereas UDP offers no guarantee that packets will arrive.\n\n3. TCP ensures packets arrive in the correct order, while UDP packets may arrive out of order or be lost.\n\n4. TCP has higher overhead due to its headers and error-checking mechanisms, making it slower, while UDP is lightweight and faster.\n\n5. TCP is used for applications requiring accuracy like web browsing, email, and file transfers, while UDP is preferred for speed-sensitive applications like video streaming, gaming, and VoIP."
+   },
+   {
+    "prompt": "Translate to French: 'The committee postponed the vote until the engineers had finished their report.'",
+    "sha": "0f5205862444",
+    "tokens": 220,
+    "tok_s": 42.83476934252188,
+    "text": "**French translation:**\n\n\u00ab Le comit\u00e9 a report\u00e9 le vote jusqu'\u00e0 ce que les ing\u00e9nieurs aient termin\u00e9 leur rapport. \u00bb\n\n**Notes on the translation:**\n- **a report\u00e9** \u2014 pass\u00e9 compos\u00e9 of *reporter* (to postpone)\n- **jusqu'\u00e0 ce que** \u2014 \"until,\" which requires the **subjunctive** mood in French\n- **aient termin\u00e9** \u2014 past subjunctive (*subjonctif pass\u00e9*), used because the engineers' finishing the report occurred before the main action's reference point\n\nAn alternative phrasing: \u00ab Le comit\u00e9 a diff\u00e9r\u00e9 le vote jusqu'\u00e0 ce que les ing\u00e9nieurs eussent achev\u00e9 leur rapport \u00bb \u2014 but this uses the literary *plus-que-parfait du subjonctif* and would sound very formal or archaic in modern French."
+   },
+   {
+    "prompt": "Write a bash script that renames every .jpeg file in a directory tree to .jpg, skipping files whose target name exists, and prints a summary.",
+    "sha": "f61465f98f84",
+    "tokens": 722,
+    "tok_s": 76.19139177421451,
+    "text": "# JPEG to JPG Renamer\n\nHere's a robust script that handles spaces in filenames, avoids overwriting existing files, and prints a summary:\n\n```bash\n#!/usr/bin/env bash\n#\n# rename-jpeg.sh \u2014 Rename all .jpeg files under a directory tree to .jpg\n# Usage: ./rename-jpeg.sh [directory]   (defaults to current directory)\n\nset -u\n\nroot=\"${1:-.}\"\n\n# Validate the starting directory\nif [[ ! -d \"$root\" ]]; then\n    echo \"Error: '$root' is not a directory\" >&2\n    exit 1\nfi\n\nrenamed=0\nskipped=0\nerrors=0\n\n# Process files safely, even if names contain spaces or newlines\nwhile IFS= read -r -d '' file; do\n    target=\"${file%.*}.jpg\"\n\n    if [[ -e \"$target\" ]]; then\n        echo \"SKIP: '$file' -> '$target' already exists\"\n        ((skipped++))\n        continue\n    fi\n\n    if mv -n -- \"$file\" \"$target\"; then\n        echo \"RENAME: '$file' -> '$target'\"\n        ((renamed++))\n    else\n        echo \"ERROR: failed to rename '$file'\" >&2\n        ((errors++))\n    fi\ndone < <(find \"$root\" -type f -iname '*.jpeg' -print0)\n\n# Summary\necho\necho \"================ Summary ================\"\necho \" Renamed : $renamed\"\necho \" Skipped : $skipped\"\necho \" Errors  : $errors\"\necho \"=========================================\"\n\n# Exit nonzero if anything failed\n((errors == 0)) || exit 1\n```\n\n## Key details\n\n- **`find ... -print0` + `read -d ''`** \u2014 safely handles filenames containing spaces, tabs, or even newlines.\n- **`-iname '*.jpeg'`** \u2014 also catches `.JPEG`, `.Jpeg`, etc. (drop the `i` if you want a case-sensitive match).\n- **`[[ -e \"$target\" ]]`** \u2014 skips the rename if the `.jpg` name is already taken, and reports it.\n- **`mv -n`** \u2014 a second line of defense against overwriting (no-clobber), in case of a race between the check and the move.\n- **`--`** \u2014 protects against filenames that begin with a dash.\n- **`${file%.*}.jpg`** \u2014 strips the extension and appends `.jpg`.\n\n## Example output\n\n```\nRENAME: './photos/vacation.jpeg' -> './photos/vacation.jpg'\nSKIP: './photos/backup.jpeg' -> './photos/backup.jpg' already exists\nRENAME: './my pics/IMG_001.jpeg' -> './my pics/IMG_001.jpg'\n\n================ Summary ================\n Renamed : 2\n Skipped : 1\n Errors  : 0\n=========================================\n```\n\n**Note:** If you want a *dry run* first (very recommended before bulk renames), replace the `mv` line with `echo \"WOULD RENAME: '$file' -> '$target'\"`."
+   },
+   {
+    "prompt": "A train leaves at 09:40 and arrives at 14:05 after a 25-minute stop. What is its moving time? Show the steps briefly.",
+    "sha": "1a0f4c59aa0b",
+    "tokens": 130,
+    "tok_s": 45.08405945611159,
+    "text": "**Step 1: Find total journey time.**\nFrom 09:40 to 14:05:\n- 09:40 \u2192 13:40 = 4 hours\n- 13:40 \u2192 14:05 = 25 minutes\n- Total = 4 h 25 min\n\n**Step 2: Subtract the stop.**\n4 h 25 min \u2212 25 min = **4 hours** of moving time."
+   },
+   {
+    "prompt": "Summarize the plot of a heist film you invent, in exactly four sentences.",
+    "sha": "da1c3b95cc9a",
+    "tokens": 194,
+    "tok_s": 74.83410285238165,
+    "text": "In *The Glass Hour*, a retired safecracker named Vivian Cho is pulled back for one last job when her estranged daughter is blackmailed into stealing a priceless clockwork orb from a Zurich bank vault that only opens during a total solar eclipse. She assembles a crew of specialists\u2014a deaf acoustics expert, a disgraced meteorologist who can predict the eclipse's exact path, and a charming con man who may be playing both sides. The heist unfolds in a breakneck sixty-minute window, but the real twist comes when Vivian discovers the orb contains her late husband's hidden fortune, and the blackmailer is her daughter's secret business partner running an elaborate con of his own. In the end, the crew out-schemes everyone by stealing the vault's entire contents while leaving the orb behind, and Vivian walks away with both the money and her daughter's forgiveness."
+   },
+   {
+    "prompt": "Give a JSON array of three objects, each with keys city, country and population (integer), for three large Asian cities.",
+    "sha": "f154de6642b8",
+    "tokens": 101,
+    "tok_s": 71.24823795628859,
+    "text": "```json\n[\n  {\n    \"city\": \"Tokyo\",\n    \"country\": \"Japan\",\n    \"population\": 13960000\n  },\n  {\n    \"city\": \"Delhi\",\n    \"country\": \"India\",\n    \"population\": 32900000\n  },\n  {\n    \"city\": \"Shanghai\",\n    \"country\": \"China\",\n    \"population\": 24870000\n  }\n]\n```"
+   },
+   {
+    "prompt": "Rewrite this sentence in the passive voice and then in the imperative: 'The engineer calibrates the sensor every morning.'",
+    "sha": "3921253e4a8e",
+    "tokens": 88,
+    "tok_s": 70.53173211576488,
+    "text": "Here are both versions:\n\n**Passive voice:**\n\"The sensor is calibrated by the engineer every morning.\"\n\n**Imperative:**\n\"Calibrate the sensor every morning.\"\n\nNote that the imperative version drops the subject (\"the engineer\") entirely, since imperatives address the listener directly as the implied subject."
+   },
+   {
+    "prompt": "What is 17 * 23? Then subtract 91 and divide by 5. Show each step.",
+    "sha": "2a37855824c4",
+    "tokens": 138,
+    "tok_s": 46.73030839262992,
+    "text": "# Step-by-Step Solution\n\n## Step 1: Multiply 17 \u00d7 23\n$$17 \\times 23 = 391$$\n\n*Breakdown: 17 \u00d7 20 = 340, and 17 \u00d7 3 = 51, so 340 + 51 = 391*\n\n## Step 2: Subtract 91\n$$391 - 91 = 300$$\n\n## Step 3: Divide by 5\n$$300 \\div 5 = 60$$\n\n## Final Answer: **60**"
+   },
+   {
+    "prompt": "Write a haiku about a lighthouse, then explain its syllable count.",
+    "sha": "51bce61f8005",
+    "tokens": 262,
+    "tok_s": 75.56284131014554,
+    "text": "**Haiku:**\n\nSteady beam of light (5)\nGuiding ships through darkened seas (7)\nThe keeper watches (5)\n\n**Syllable Breakdown:**\n\n*Line 1: \"Steady beam of light\" \u2014 5 syllables*\n- Stead-y (2) + beam (1) + of (1) + light (1) = 5\n\n*Line 2: \"Guiding ships through darkened seas\" \u2014 7 syllables*\n- Guid-ing (2) + ships (1) + through (1) + dark-ened (2) + seas (1) = 7\n\n*Line 3: \"The keeper watches\" \u2014 5 syllables*\n- The (1) + keep-er (2) + watch-es (2) = 5\n\nThis follows the traditional haiku structure of 5-7-5 syllables across three lines. The poem also captures a classic haiku spirit: a single vivid image (the lighthouse beam), a sense of nature's vastness (the darkened sea), and a quiet human presence observing it all (the keeper)."
+   },
+   {
+    "prompt": "Name the planets of the solar system in order from the Sun, one per line, and mark the gas giants with an asterisk.",
+    "sha": "ce8ee2eb7b90",
+    "tokens": 26,
+    "tok_s": 56.86057972903395,
+    "text": "Mercury\nVenus\nEarth\nMars\nJupiter *\nSaturn *\nUranus *\nNeptune *"
+   }
+  ]
+ }
+}

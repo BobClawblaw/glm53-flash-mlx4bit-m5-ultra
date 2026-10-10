@@ -1,0 +1,86 @@
+{
+ "name": "vision",
+ "score": 1.0,
+ "cases": 12,
+ "passed": 12,
+ "seconds": 6.979187965393066,
+ "notes": [
+  "all probes answered"
+ ],
+ "details": {
+  "probes": [
+   {
+    "name": "red-circle-blue-square",
+    "ok": true,
+    "reply": "The image contains a red circle and a blue square.",
+    "error": null
+   },
+   {
+    "name": "green-triangle",
+    "ok": true,
+    "reply": "A green triangle.",
+    "error": null
+   },
+   {
+    "name": "three-circles",
+    "ok": true,
+    "reply": "3",
+    "error": null
+   },
+   {
+    "name": "two-squares",
+    "ok": true,
+    "reply": "2",
+    "error": null
+   },
+   {
+    "name": "left-right",
+    "ok": true,
+    "reply": "**Left** \u2014 the blue square is on the left of the red circle.",
+    "error": null
+   },
+   {
+    "name": "right-left",
+    "ok": true,
+    "reply": "The blue square is on the **right** of the red circle.",
+    "error": null
+   },
+   {
+    "name": "yellow-circle",
+    "ok": true,
+    "reply": "Yellow",
+    "error": null
+   },
+   {
+    "name": "four-triangles",
+    "ok": true,
+    "reply": "**4**\n\nThere are four green triangles arranged in a horizontal row.",
+    "error": null
+   },
+   {
+    "name": "blank",
+    "ok": true,
+    "reply": "This image appears to be completely blank, showing only a plain white surface with no visible objects, text, or features",
+    "error": null
+   },
+   {
+    "name": "black-square-top",
+    "ok": true,
+    "reply": "Based on the image, the black square is **above** the red circle.",
+    "error": null
+   },
+   {
+    "name": "mixed-count",
+    "ok": true,
+    "reply": "2",
+    "error": null
+   },
+   {
+    "name": "colours-list",
+    "ok": true,
+    "reply": "Red, green, blue",
+    "error": null
+   }
+  ]
+ }
+}

@@ -1,0 +1,6 @@
+1 first question: 6376 prompt tokens, 0 cached, 6.05 s
+2 second question beside another stream: 6362 of 6376 cached, 0.55 s
+3 nearly the whole pool: 'big ok' in 0.14 s
+4 second question again: 0 of 6376 cached, 4.75 s
+reply 4 equals reply 2: True
+reply 2: 'Section 7 reports that the tunnel ventilation team revised 710 items during week 13, noting that subway tiling depends o'
