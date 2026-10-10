@@ -1,0 +1,104 @@
+{
+ "name": "long-context",
+ "score": 1.0,
+ "cases": 29,
+ "passed": 29,
+ "seconds": 317.76576924324036,
+ "notes": [
+  "needles 9/9 to 51k, facts 10/10@25k, 10/10@51k, slowest prefill 899 tok/s"
+ ],
+ "details": {
+  "needles": [
+   {
+    "tokens": 6390,
+    "depth": 0.1,
+    "found": true,
+    "seconds": 7.105956917046569,
+    "prefill_tok_s": 899.2455308406035,
+    "reply": "74335"
+   },
+   {
+    "tokens": 6392,
+    "depth": 0.5,
+    "found": true,
+    "seconds": 6.873746624914929,
+    "prefill_tok_s": 929.9149865127752,
+    "reply": "7-4-3-3-5"
+   },
+   {
+    "tokens": 6418,
+    "depth": 0.9,
+    "found": true,
+    "seconds": 7.072612832998857,
+    "prefill_tok_s": 907.4439887413864,
+    "reply": "7-4-3-3-5"
+   },
+   {
+    "tokens": 25435,
+    "depth": 0.1,
+    "found": true,
+    "seconds": 23.344330250052735,
+    "prefill_tok_s": 1089.5579238107523,
+    "reply": "74335"
+   },
+   {
+    "tokens": 25450,
+    "depth": 0.5,
+    "found": true,
+    "seconds": 24.206202250090428,
+    "prefill_tok_s": 1051.3834321079808,
+    "reply": "7-4-3-3-5"
+   },
+   {
+    "tokens": 25466,
+    "depth": 0.9,
+    "found": true,
+    "seconds": 23.575441124965437,
+    "prefill_tok_s": 1080.1918770051152,
+    "reply": "7-4-3-3-5"
+   },
+   {
+    "tokens": 50981,
+    "depth": 0.1,
+    "found": true,
+    "seconds": 49.15028104104567,
+    "prefill_tok_s": 1037.2473751966033,
+    "reply": "7-4-3-3-5"
+   },
+   {
+    "tokens": 51054,
+    "depth": 0.5,
+    "found": true,
+    "seconds": 50.05110537505243,
+    "prefill_tok_s": 1020.0374121097325,
+    "reply": "7-4-3-3-5"
+   },
+   {
+    "tokens": 51004,
+    "depth": 0.9,
+    "found": true,
+    "seconds": 50.49290087504778,
+    "prefill_tok_s": 1010.1221976969993,
+    "reply": "7-4-3-3-5"
+   }
+  ],
+  "facts": [
+   {
+    "tokens": 25562,
+    "recalled": 10,
+    "of": 10,
+    "seconds": 25.595885124988854,
+    "prefill_tok_s": 998.6761495129632,
+    "reply": "Avery: 563\nBlake: 986\nCasey: 673\nDevin: 977\nEmery: 899\nFinley: 576\nHarper: 562\nJordan: 620\nKendall: 975\nMorgan: 701"
+   },
+   {
+    "tokens": 51109,
+    "recalled": 10,
+    "of": 10,
+    "seconds": 50.288838624954224,
+    "prefill_tok_s": 1016.3090140371386,
+    "reply": "Avery: 563\nBlake: 986\nCasey: 673\nDevin: 977\nEmery: 899\nFinley: 576\nHarper: 562\nJordan: 620\nKendall: 975\nMorgan: 701"
+   }
+  ]
+ }
+}

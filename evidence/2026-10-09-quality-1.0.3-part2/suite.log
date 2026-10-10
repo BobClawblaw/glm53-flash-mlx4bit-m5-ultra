@@ -1,0 +1,5 @@
+quality suite: http://0.0.0.0:8888 as GLM-5.3-Flash-MLX-4bit; checks: ifeval, gsm8k, mgsm, mmlu, repetition, long-context, vision, snapshot
+ifeval            98/150     65.3%  (913s)  loose 98/150, strict 92/150, 150 covered prompts
+gsm8k            245/250     98.0%  (526s)  misses at [20, 21, 53, 119, 173]
+mgsm             220/240     91.7%  (1352s)  de 28/30, es 29/30, fr 27/30, ja 28/30, zh 28/30, ru 29/30, sw 25/30, bn 26/30
+suite exit 241

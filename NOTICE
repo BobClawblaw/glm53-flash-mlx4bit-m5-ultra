@@ -1,0 +1,17 @@
+This repository's own files (the mac/ orchestrator, the tools, the tests, the launchd job and the documents) are
+MIT, see LICENSE.
+
+patches/glm-one-mac-vision-v1.0.4.patch is a change set to TensorFold (https://github.com/ashhart/TensorFold,
+Apache License 2.0, copyright the TensorFold contributors) and is distributed under the Apache License 2.0 like the
+code it modifies (LICENSES/Apache-2.0.txt). `python3 -m mac build` applies it on top of TensorFold at the pinned
+commit. Its image resampler follows Pillow's Resample.c (MIT-CMU licence, the Pillow authors) and its erf follows
+FreeBSD's msun (Sun Microsystems' permissive notice); both are reimplemented, not copied, to match their results.
+
+The checkpoint this recipe serves, TensorFold/GLM-5.3-Flash-MLX-4bit-MTP, is a conversion of Z.AI's GLM-5.3-Flash
+and carries the MIT licence (copyright Z.AI Co., Ltd); the recipe downloads it from Hugging Face and does not
+redistribute weights. tests/images/zai-logo.png is the logo shipped in that checkpoint's repository.
+
+The quality suite and decode ruler are the Spark recipe's (BobClawblaw/qwen38-flashnext-int4mixed-2x-dgx-sparks),
+cloned at a pinned commit under .external/ and run there; nothing of them is copied into this tree. tools/
+vision_reference.py and tools/vision_noise.py import TensorFold 0.6.6 and mlx-vlm (MIT) from a separate venv, as
+references only.

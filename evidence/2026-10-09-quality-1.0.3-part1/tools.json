@@ -1,0 +1,13 @@
+{
+ "name": "tools",
+ "score": 0.95,
+ "cases": 60,
+ "passed": 57,
+ "seconds": 102.98970222473145,
+ "notes": [
+  "'Set a timer for 5 minutes.': got [('set_timer', {'label': '5 minutes', 'seconds': 300})]",
+  "'Walking directions from the Louvre to No': got [('get_directions', {'destination': 'notre-dame de paris', 'mode': 'walking', 'origin': 'louvre museum, paris'})]",
+  "'Timer, 45 seconds.': got [('set_timer', {'label': 'timer', 'seconds': 45})]"
+ ],
+ "details": {}
+}

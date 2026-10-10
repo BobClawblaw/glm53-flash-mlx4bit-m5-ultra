@@ -1,0 +1,184 @@
+{
+ "name": "drafts",
+ "score": 1.0,
+ "cases": 12,
+ "passed": 12,
+ "seconds": 64.53008031845093,
+ "notes": [
+  "drafted 81 tok/s vs undrafted 63 tok/s"
+ ],
+ "details": {
+  "drafted": [
+   {
+    "prompt": "Explain, in about 150 words, why the sky is blue and sunsets are red.",
+    "sha": "c294efff8882",
+    "tokens": 233,
+    "tok_s": 66.21589259132311,
+    "text": "The sky is blue because of a phenomenon called **Rayleigh scattering**. Sunlight contains all colors of the visible spectrum, and as it passes through the atmosphere, it collides with gas molecules (mostly nitrogen and oxygen) that are much smaller than the light's wavelength. These molecules scatter shorter wavelengths \u2014 blue and violet \u2014 far more strongly than longer ones, roughly in proportion to 1/\u03bb\u2074. So blue light gets bounced around the sky in all directions, and that scattered blue light is what reaches our eyes from every part of the sky.\n\nSunsets are red for the same reason, viewed from the opposite angle. When the sun sits low on the horizon, its light must travel through much more atmosphere to reach you. Along that long path, most of the blue light is scattered away entirely, leaving the longer wavelengths \u2014 red, orange, and yellow \u2014 to pass straight through to your eyes. The sun itself looks reddened, and clouds or haze catch those warm colors.\n\nA small bonus: the sky isn't violet because the sun emits less violet, our eyes are less sensitive to it, and some is absorbed high in the atmosphere."
+   },
+   {
+    "prompt": "Write a Python function that parses an ISO-8601 date string and returns the day of the week, with a docstring and two examples.",
+    "sha": "0661f69893bf",
+    "tokens": 300,
+    "tok_s": 99.30938048808704,
+    "text": "```python\nfrom datetime import datetime\n\ndef day_of_week(iso_date: str) -> str:\n    \"\"\"\n    Parse an ISO-8601 date string and return the day of the week.\n\n    Args:\n        iso_date: A date string in ISO-8601 format (e.g., \"2024-06-15\").\n\n    Returns:\n        The English name of the day of the week (e.g., \"Saturday\").\n\n    Raises:\n        ValueError: If the string is not a valid ISO-8601 date.\n\n    Examples:\n        >>> day_of_week(\"2024-06-15\")\n        'Saturday'\n        >>> day_of_week(\"2024-01-01\")\n        'Monday'\n    \"\"\"\n    return datetime.strptime(iso_date, \"%Y-%m-%d\").strftime(\"%A\")\n```\n\n**How it works:**\n- `datetime.strptime` parses the string using the `%Y-%m-%d` format (the standard ISO-8601 date, e.g. `2024-06-15`).\n- `strftime(\"%A\")` formats the parsed date as the full weekday name.\n\n**Usage:**\n\n```python\nprint(day_of_week(\"2024-06-15\"))  # Saturday\nprint(day_of_week(\"2024-01-01\"))  # Monday\n```\n\nIf you need to support full ISO-8601 timestamps too (e.g. `\"2024-06-15T10"
+   },
+   {
+    "prompt": "List five differences between TCP and UDP as a numbered list, one sentence each.",
+    "sha": "f6e5712ddb4e",
+    "tokens": 151,
+    "tok_s": 87.78398628623954,
+    "text": "1. TCP is connection-oriented, requiring a handshake before data transfer, while UDP is connectionless and sends data without establishing a connection.\n2. TCP guarantees reliable, ordered delivery of data, while UDP provides no guarantee of delivery, ordering, or error checking.\n3. TCP is slower due to overhead from acknowledgments, retransmissions, and flow control, while UDP is faster with minimal protocol overhead.\n4. TCP is best suited for applications requiring accuracy, such as web browsing, email, and file transfers, while UDP is ideal for speed-sensitive applications like video streaming, gaming, and VoIP.\n5. TCP performs congestion control to avoid overwhelming the network, while UDP has no congestion control and can consume bandwidth as fast as the application allows."
+   },
+   {
+    "prompt": "Translate to French: 'The committee postponed the vote until the engineers had finished their report.'",
+    "sha": "c280793f6304",
+    "tokens": 181,
+    "tok_s": 90.79740690890824,
+    "text": "Here's the French translation:\n\n**\u00ab Le comit\u00e9 a report\u00e9 le vote jusqu'\u00e0 ce que les ing\u00e9nieurs aient termin\u00e9 leur rapport. \u00bb**\n\nA few notes on the translation:\n\n- **\u00ab a report\u00e9 \u00bb** \u2014 the pass\u00e9 compos\u00e9 is the natural choice for a completed past action in this context.\n- **\u00ab jusqu'\u00e0 ce que \u00bb** \u2014 this conjunction requires the **subjunctive** mood in French, which is why the verb becomes **\u00ab aient termin\u00e9 \u00bb** (past subjunctive) rather than the indicative \u00ab ont termin\u00e9 \u00bb.\n- **\u00ab leur rapport \u00bb** \u2014 the singular possessive works here since the engineers share one report, matching the English.\n\nAn alternative phrasing you might also hear: \u00ab Le comit\u00e9 a remis le vote \u00e0 plus tard jusqu'\u00e0 ce que les ing\u00e9nieurs aient fini leur rapport. \u00bb"
+   },
+   {
+    "prompt": "Write a bash script that renames every .jpeg file in a directory tree to .jpg, skipping files whose target name exists, and prints a summary.",
+    "sha": "0390a5170db3",
+    "tokens": 300,
+    "tok_s": 88.21096260222728,
+    "text": "# Bash Script: Rename .jpeg \u2192 .jpg\n\n```bash\n#!/usr/bin/env bash\n#\n# rename-jpeg.sh \u2014 Rename all .jpeg files to .jpg in a directory tree.\n# Skips files whose target name already exists, and prints a summary.\n\nset -euo pipefail\n\n# --- Configuration ---------------------------------------------------------\nEXT_SRC=\"jpeg\"\nEXT_DST=\"jpg\"\n\n# --- Argument handling -----------------------------------------------------\nif [[ $# -ne 1 ]]; then\n    echo \"Usage: $0 <directory>\" >&2\n    exit 1\nfi\n\nroot=$1\n\nif [[ ! -d \"$root\" ]]; then\n    echo \"Error: '$root' is not a directory.\" >&2\n    exit 1\nfi\n\n# --- Counters --------------------------------------------------------------\nrenamed=0\nskipped=0\nerrors=0\n\n# --- Rename loop -----------------------------------------------------------\n# -print0 / read -d '' handles spaces, newlines, and other odd filenames.\nwhile IFS= read -r -d '' file; do\n    base=${file%.*}          # strip extension\n    target=\"${base}.jpg\"\n\n    if [[ -e \"$target\" ]]; then\n        echo \"SKIP: '$file' -> '$target' already exists\"\n        ((skipped++))\n        continue\n    fi\n\n    if mv -n -- \"$file\" \"$target\"; then\n        echo \"RENAME: '$file' -> '$target'\"\n        ((renamed++"
+   },
+   {
+    "prompt": "A train leaves at 09:40 and arrives at 14:05 after a 25-minute stop. What is its moving time? Show the steps briefly.",
+    "sha": "7c6dc05324ad",
+    "tokens": 129,
+    "tok_s": 84.88829815085565,
+    "text": "# Train Moving Time\n\n## Step 1: Find Total Journey Time\nFrom 09:40 to 14:05\n\n- 09:40 \u2192 14:40 would be 5 hours\n- But we need 14:05, which is 35 minutes earlier\n\n**Total time = 4 hours 25 minutes**\n\n## Step 2: Subtract the Stop\n$$4 \\text{ h } 25 \\text{ min} - 25 \\text{ min} = 4 \\text{ h } 0 \\text{ min}$$\n\n## Answer\n**Moving time = 4 hours**"
+   },
+   {
+    "prompt": "Summarize the plot of a heist film you invent, in exactly four sentences.",
+    "sha": "e07b30fa82ab",
+    "tokens": 190,
+    "tok_s": 77.03390410564135,
+    "text": "**The Gilded Hour**\n\nA disgraced horologist and his estranged daughter, a safecracker fresh out of prison, assemble a crew to steal a legendary clockwork automaton from the vault of a private bank that once ruined their family. Their plan hinges on the automaton itself: a 19th-century mechanical bird that, when wound, mimics any sound it has ever \"heard,\" including the vault's combination being spoken aloud decades ago by the bank's founder. During the heist, the daughter discovers the automaton's memory holds a recording of her mother's final words\u2014words that reveal the family's ruin was no accident, but her mother's own deliberate sacrifice to protect them. In the end, they abandon the automaton to the vault, walk away with nothing but the truth, and the daughter winds the bird one last time in her apartment, letting it sing her mother's voice into the empty room."
+   },
+   {
+    "prompt": "Give a JSON array of three objects, each with keys city, country and population (integer), for three large Asian cities.",
+    "sha": "ef5d4fd8245e",
+    "tokens": 300,
+    "tok_s": 95.2975314027804,
+    "text": "```json\n[\n  {\n    \"city\": \"Tokyo\",\n    \"country\": \"Japan\",\n    \"population\": 13960000\n  },\n  {\n    \"city\": \"Delhi\",\n    \"country\": \"India\",\n  },\n  {\n    \"city\": \"Shanghai\",\n    \"country\": \"China\",\n    \"population\": 24870000\n  }\n]\n```\n\nNote: The population for Delhi was omitted in error. Here is the corrected version:\n\n```json\n[\n  \"city\": \"Delhi\",\n  \"country\": \"India\",\n  \"population\": 32900000\n]\n```\n\nThe corrected version is also invalid JSON (it's not an array of objects, and uses `:` instead of \"key\": value syntax). Let me provide the complete, valid JSON array:\n\n```json\n[\n  {\n    \"city\": \"Tokyo\",\n    \"population\": 13960000\n  },\n  asked to give a JSON array of three objects, each with keys city, country and population (integer), for three large Asian cities.</think>```json\n[\n  {\n    \"city\": \"Tokyo\",\n    \"country\": \"Japan\",\n    \"population\": 13960000\n  },\n  {\n    \"city\": \"Delhi\",\n    \"country\": \"India\",\n    \"population\": 32900000\n  },\n  {\n    \"city\": \"Shanghai\",\n    \"country\": \""
+   },
+   {
+    "prompt": "Rewrite this sentence in the passive voice and then in the imperative: 'The engineer calibrates the sensor every morning.'",
+    "sha": "c79c036de770",
+    "tokens": 128,
+    "tok_s": 81.90130684831146,
+    "text": "# Sentence Transformations\n\n**Original:** The engineer calibrates the sensor every morning.\n\n**Passive Voice:**\nThe sensor is calibrated by the engineer every morning.\n\n**Imperative:**\nCalibrate the sensor every morning.\n\n---\n\n**Quick notes:**\n- **Passive voice** shifts the focus from the doer (engineer) to the receiver of the action (sensor). The object becomes the subject, and the verb changes to \"is calibrated.\"\n- **Imperative** drops the subject entirely and uses the base form of the verb, giving it a command or instruction feel \u2014 perfect for procedures and manuals."
+   },
+   {
+    "prompt": "What is 17 * 23? Then subtract 91 and divide by 5. Show each step.",
+    "sha": "0bd69ae7d9be",
+    "tokens": 115,
+    "tok_s": 89.35549440738231,
+    "text": "# Step-by-Step Solution\n\n## Step 1: Multiply 17 \u00d7 23\n\n$$17 \\times 23 = 391$$\n\n**How:** 17 \u00d7 23 = 17 \u00d7 20 + 17 \u00d7 3 = 340 + 51 = 391\n\n## Step 2: Subtract 91\n\n$$391 - 91 = 300$$\n\n## Step 3: Divide by 5\n\n$$300 \\div 5 = 60$$\n\n## Final Answer\n\n$$\\boxed{60}$$"
+   },
+   {
+    "prompt": "Write a haiku about a lighthouse, then explain its syllable count.",
+    "sha": "e10907b8f1c9",
+    "tokens": 300,
+    "tok_s": 90.44361236174159,
+    "text": "A haiku is a traditional Japanese poem with a 5-7-5 syllable structure across three lines. Here's one about a lighthouse:\n\n**Lighthouse Haiku:**\n\n> Beacon on the cliff (5)\n> Sweeping arms of golden light (7)\n> Guides ships through the night (5)\n\n**Syllable Breakdown:**\n\n**Line 1: \"Beacon on the cliff\" \u2014 5 syllables**\n- Bea-con (2)\n- on (1)\n- the (1)\n- cliff (1)\n- Total: 2 + 1 + 1 + 1 = **5** \u2713\n\n**Line 2: \"Sweeping arms of golden light\" \u2014 7 syllables**\n- Sweep-ing (2)\n- arms (1)\n- of (1)\n- gold-en (2)\n- light (1)\n- Total: 2 + 1 + 1 + 2 + 1 = **7** \u2713\n\n**Line 3: \"Guides ships through the night\" \u2014 5 syllables**\n- Guides (1)\n- ships (1)\n- through (1)\n- the (1)\n- night (1)\n- Total: 1 + 1 + 1 + 1 + 1 = **5** \u2713\n\nThe poem follows the classic 5-7-5 pattern, and it also captures the traditional haiku spirit of a single vivid image \u2014 the lighthouse"
+   },
+   {
+    "prompt": "Name the planets of the solar system in order from the Sun, one per line, and mark the gas giants with an asterisk.",
+    "sha": "c903db274cd2",
+    "tokens": 25,
+    "tok_s": 18.451865132797987,
+    "text": "Mercury\nVenus\nEarth\nMars\nJupiter*\nSaturn*\nUranus*\nNeptune*"
+   }
+  ],
+  "undrafted": [
+   {
+    "prompt": "Explain, in about 150 words, why the sky is blue and sunsets are red.",
+    "sha": "c294efff8882",
+    "tokens": 233,
+    "tok_s": 65.34674577244468,
+    "text": "The sky is blue because of a phenomenon called **Rayleigh scattering**. Sunlight contains all colors of the visible spectrum, and as it passes through the atmosphere, it collides with gas molecules (mostly nitrogen and oxygen) that are much smaller than the light's wavelength. These molecules scatter shorter wavelengths \u2014 blue and violet \u2014 far more strongly than longer ones, roughly in proportion to 1/\u03bb\u2074. So blue light gets bounced around the sky in all directions, and that scattered blue light is what reaches our eyes from every part of the sky.\n\nSunsets are red for the same reason, viewed from the opposite angle. When the sun sits low on the horizon, its light must travel through much more atmosphere to reach you. Along that long path, most of the blue light is scattered away entirely, leaving the longer wavelengths \u2014 red, orange, and yellow \u2014 to pass straight through to your eyes. The sun itself looks reddened, and clouds or haze catch those warm colors.\n\nA small bonus: the sky isn't violet because the sun emits less violet, our eyes are less sensitive to it, and some is absorbed high in the atmosphere."
+   },
+   {
+    "prompt": "Write a Python function that parses an ISO-8601 date string and returns the day of the week, with a docstring and two examples.",
+    "sha": "0661f69893bf",
+    "tokens": 300,
+    "tok_s": 66.41145911878705,
+    "text": "```python\nfrom datetime import datetime\n\ndef day_of_week(iso_date: str) -> str:\n    \"\"\"\n    Parse an ISO-8601 date string and return the day of the week.\n\n    Args:\n        iso_date: A date string in ISO-8601 format (e.g., \"2024-06-15\").\n\n    Returns:\n        The English name of the day of the week (e.g., \"Saturday\").\n\n    Raises:\n        ValueError: If the string is not a valid ISO-8601 date.\n\n    Examples:\n        >>> day_of_week(\"2024-06-15\")\n        'Saturday'\n        >>> day_of_week(\"2024-01-01\")\n        'Monday'\n    \"\"\"\n    return datetime.strptime(iso_date, \"%Y-%m-%d\").strftime(\"%A\")\n```\n\n**How it works:**\n- `datetime.strptime` parses the string using the `%Y-%m-%d` format (the standard ISO-8601 date, e.g. `2024-06-15`).\n- `strftime(\"%A\")` formats the parsed date as the full weekday name.\n\n**Usage:**\n\n```python\nprint(day_of_week(\"2024-06-15\"))  # Saturday\nprint(day_of_week(\"2024-01-01\"))  # Monday\n```\n\nIf you need to support full ISO-8601 timestamps too (e.g. `\"2024-06-15T10"
+   },
+   {
+    "prompt": "List five differences between TCP and UDP as a numbered list, one sentence each.",
+    "sha": "f6e5712ddb4e",
+    "tokens": 151,
+    "tok_s": 64.30164484535263,
+    "text": "1. TCP is connection-oriented, requiring a handshake before data transfer, while UDP is connectionless and sends data without establishing a connection.\n2. TCP guarantees reliable, ordered delivery of data, while UDP provides no guarantee of delivery, ordering, or error checking.\n3. TCP is slower due to overhead from acknowledgments, retransmissions, and flow control, while UDP is faster with minimal protocol overhead.\n4. TCP is best suited for applications requiring accuracy, such as web browsing, email, and file transfers, while UDP is ideal for speed-sensitive applications like video streaming, gaming, and VoIP.\n5. TCP performs congestion control to avoid overwhelming the network, while UDP has no congestion control and can consume bandwidth as fast as the application allows."
+   },
+   {
+    "prompt": "Translate to French: 'The committee postponed the vote until the engineers had finished their report.'",
+    "sha": "c280793f6304",
+    "tokens": 181,
+    "tok_s": 65.18743316979932,
+    "text": "Here's the French translation:\n\n**\u00ab Le comit\u00e9 a report\u00e9 le vote jusqu'\u00e0 ce que les ing\u00e9nieurs aient termin\u00e9 leur rapport. \u00bb**\n\nA few notes on the translation:\n\n- **\u00ab a report\u00e9 \u00bb** \u2014 the pass\u00e9 compos\u00e9 is the natural choice for a completed past action in this context.\n- **\u00ab jusqu'\u00e0 ce que \u00bb** \u2014 this conjunction requires the **subjunctive** mood in French, which is why the verb becomes **\u00ab aient termin\u00e9 \u00bb** (past subjunctive) rather than the indicative \u00ab ont termin\u00e9 \u00bb.\n- **\u00ab leur rapport \u00bb** \u2014 the singular possessive works here since the engineers share one report, matching the English.\n\nAn alternative phrasing you might also hear: \u00ab Le comit\u00e9 a remis le vote \u00e0 plus tard jusqu'\u00e0 ce que les ing\u00e9nieurs aient fini leur rapport. \u00bb"
+   },
+   {
+    "prompt": "Write a bash script that renames every .jpeg file in a directory tree to .jpg, skipping files whose target name exists, and prints a summary.",
+    "sha": "0390a5170db3",
+    "tokens": 300,
+    "tok_s": 66.04785089313874,
+    "text": "# Bash Script: Rename .jpeg \u2192 .jpg\n\n```bash\n#!/usr/bin/env bash\n#\n# rename-jpeg.sh \u2014 Rename all .jpeg files to .jpg in a directory tree.\n# Skips files whose target name already exists, and prints a summary.\n\nset -euo pipefail\n\n# --- Configuration ---------------------------------------------------------\nEXT_SRC=\"jpeg\"\nEXT_DST=\"jpg\"\n\n# --- Argument handling -----------------------------------------------------\nif [[ $# -ne 1 ]]; then\n    echo \"Usage: $0 <directory>\" >&2\n    exit 1\nfi\n\nroot=$1\n\nif [[ ! -d \"$root\" ]]; then\n    echo \"Error: '$root' is not a directory.\" >&2\n    exit 1\nfi\n\n# --- Counters --------------------------------------------------------------\nrenamed=0\nskipped=0\nerrors=0\n\n# --- Rename loop -----------------------------------------------------------\n# -print0 / read -d '' handles spaces, newlines, and other odd filenames.\nwhile IFS= read -r -d '' file; do\n    base=${file%.*}          # strip extension\n    target=\"${base}.jpg\"\n\n    if [[ -e \"$target\" ]]; then\n        echo \"SKIP: '$file' -> '$target' already exists\"\n        ((skipped++))\n        continue\n    fi\n\n    if mv -n -- \"$file\" \"$target\"; then\n        echo \"RENAME: '$file' -> '$target'\"\n        ((renamed++"
+   },
+   {
+    "prompt": "A train leaves at 09:40 and arrives at 14:05 after a 25-minute stop. What is its moving time? Show the steps briefly.",
+    "sha": "7c6dc05324ad",
+    "tokens": 129,
+    "tok_s": 61.74947388711621,
+    "text": "# Train Moving Time\n\n## Step 1: Find Total Journey Time\nFrom 09:40 to 14:05\n\n- 09:40 \u2192 14:40 would be 5 hours\n- But we need 14:05, which is 35 minutes earlier\n\n**Total time = 4 hours 25 minutes**\n\n## Step 2: Subtract the Stop\n$$4 \\text{ h } 25 \\text{ min} - 25 \\text{ min} = 4 \\text{ h } 0 \\text{ min}$$\n\n## Answer\n**Moving time = 4 hours**"
+   },
+   {
+    "prompt": "Summarize the plot of a heist film you invent, in exactly four sentences.",
+    "sha": "e07b30fa82ab",
+    "tokens": 190,
+    "tok_s": 65.11333103691736,
+    "text": "**The Gilded Hour**\n\nA disgraced horologist and his estranged daughter, a safecracker fresh out of prison, assemble a crew to steal a legendary clockwork automaton from the vault of a private bank that once ruined their family. Their plan hinges on the automaton itself: a 19th-century mechanical bird that, when wound, mimics any sound it has ever \"heard,\" including the vault's combination being spoken aloud decades ago by the bank's founder. During the heist, the daughter discovers the automaton's memory holds a recording of her mother's final words\u2014words that reveal the family's ruin was no accident, but her mother's own deliberate sacrifice to protect them. In the end, they abandon the automaton to the vault, walk away with nothing but the truth, and the daughter winds the bird one last time in her apartment, letting it sing her mother's voice into the empty room."
+   },
+   {
+    "prompt": "Give a JSON array of three objects, each with keys city, country and population (integer), for three large Asian cities.",
+    "sha": "ef5d4fd8245e",
+    "tokens": 300,
+    "tok_s": 66.66060795850456,
+    "text": "```json\n[\n  {\n    \"city\": \"Tokyo\",\n    \"country\": \"Japan\",\n    \"population\": 13960000\n  },\n  {\n    \"city\": \"Delhi\",\n    \"country\": \"India\",\n  },\n  {\n    \"city\": \"Shanghai\",\n    \"country\": \"China\",\n    \"population\": 24870000\n  }\n]\n```\n\nNote: The population for Delhi was omitted in error. Here is the corrected version:\n\n```json\n[\n  \"city\": \"Delhi\",\n  \"country\": \"India\",\n  \"population\": 32900000\n]\n```\n\nThe corrected version is also invalid JSON (it's not an array of objects, and uses `:` instead of \"key\": value syntax). Let me provide the complete, valid JSON array:\n\n```json\n[\n  {\n    \"city\": \"Tokyo\",\n    \"population\": 13960000\n  },\n  asked to give a JSON array of three objects, each with keys city, country and population (integer), for three large Asian cities.</think>```json\n[\n  {\n    \"city\": \"Tokyo\",\n    \"country\": \"Japan\",\n    \"population\": 13960000\n  },\n  {\n    \"city\": \"Delhi\",\n    \"country\": \"India\",\n    \"population\": 32900000\n  },\n  {\n    \"city\": \"Shanghai\",\n    \"country\": \""
+   },
+   {
+    "prompt": "Rewrite this sentence in the passive voice and then in the imperative: 'The engineer calibrates the sensor every morning.'",
+    "sha": "c79c036de770",
+    "tokens": 128,
+    "tok_s": 62.52577508756532,
+    "text": "# Sentence Transformations\n\n**Original:** The engineer calibrates the sensor every morning.\n\n**Passive Voice:**\nThe sensor is calibrated by the engineer every morning.\n\n**Imperative:**\nCalibrate the sensor every morning.\n\n---\n\n**Quick notes:**\n- **Passive voice** shifts the focus from the doer (engineer) to the receiver of the action (sensor). The object becomes the subject, and the verb changes to \"is calibrated.\"\n- **Imperative** drops the subject entirely and uses the base form of the verb, giving it a command or instruction feel \u2014 perfect for procedures and manuals."
+   },
+   {
+    "prompt": "What is 17 * 23? Then subtract 91 and divide by 5. Show each step.",
+    "sha": "0bd69ae7d9be",
+    "tokens": 115,
+    "tok_s": 62.05148552296088,
+    "text": "# Step-by-Step Solution\n\n## Step 1: Multiply 17 \u00d7 23\n\n$$17 \\times 23 = 391$$\n\n**How:** 17 \u00d7 23 = 17 \u00d7 20 + 17 \u00d7 3 = 340 + 51 = 391\n\n## Step 2: Subtract 91\n\n$$391 - 91 = 300$$\n\n## Step 3: Divide by 5\n\n$$300 \\div 5 = 60$$\n\n## Final Answer\n\n$$\\boxed{60}$$"
+   },
+   {
+    "prompt": "Write a haiku about a lighthouse, then explain its syllable count.",
+    "sha": "e10907b8f1c9",
+    "tokens": 300,
+    "tok_s": 67.20153175346603,
+    "text": "A haiku is a traditional Japanese poem with a 5-7-5 syllable structure across three lines. Here's one about a lighthouse:\n\n**Lighthouse Haiku:**\n\n> Beacon on the cliff (5)\n> Sweeping arms of golden light (7)\n> Guides ships through the night (5)\n\n**Syllable Breakdown:**\n\n**Line 1: \"Beacon on the cliff\" \u2014 5 syllables**\n- Bea-con (2)\n- on (1)\n- the (1)\n- cliff (1)\n- Total: 2 + 1 + 1 + 1 = **5** \u2713\n\n**Line 2: \"Sweeping arms of golden light\" \u2014 7 syllables**\n- Sweep-ing (2)\n- arms (1)\n- of (1)\n- gold-en (2)\n- light (1)\n- Total: 2 + 1 + 1 + 2 + 1 = **7** \u2713\n\n**Line 3: \"Guides ships through the night\" \u2014 5 syllables**\n- Guides (1)\n- ships (1)\n- through (1)\n- the (1)\n- night (1)\n- Total: 1 + 1 + 1 + 1 + 1 = **5** \u2713\n\nThe poem follows the classic 5-7-5 pattern, and it also captures the traditional haiku spirit of a single vivid image \u2014 the lighthouse"
+   },
+   {
+    "prompt": "Name the planets of the solar system in order from the Sun, one per line, and mark the gas giants with an asterisk.",
+    "sha": "c903db274cd2",
+    "tokens": 25,
+    "tok_s": 41.93870620809414,
+    "text": "Mercury\nVenus\nEarth\nMars\nJupiter*\nSaturn*\nUranus*\nNeptune*"
+   }
+  ]
+ }
+}

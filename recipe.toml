@@ -1,0 +1,86 @@
+# The recipe's defaults. `local.toml` next to this file overrides them for this Mac (copy local.example.toml); an
+# environment variable of the same name in upper case overrides both (PORT=8090 python3 -m mac up).
+
+[model]
+repo = "TensorFold/GLM-5.3-Flash-MLX-4bit-MTP"
+revision = "d2b17f5253440224422b150705c1109a9a3a0368"
+served_name = "GLM-5.3-Flash-MLX-4bit"
+same_as = ""                              # other repositories whose snapshot at this revision is the same tree (comma-separated)
+
+[engine]
+tensorfold_repo = "https://github.com/ashhart/TensorFold.git"
+tensorfold_sha = "d4fc1964d0637c33e09ddac18aec936f962bb646"     # v1.0.4
+tensorfold_src = "~/github/TensorFold"   # a checkout holding the sha; `build` adds a worktree at it under tf_cache
+# applied to the worktree before the build. Pinned by sha256; never edit it in place, write a new one and re-pin.
+#  - GLM's one-Mac load limit (70% of RAM, 179 GB here) becomes overridable by TENSORFOLD_MEMORY_LIMIT_GB, so the
+#    180.6 GB checkpoint loads on one 256 GB Mac;
+#  - with GLM_RESIDENCY the weights' residency set is requested before their reads, not after, and with GLM_WIRE every
+#    buffer is wired (mlock) before it fills: past ~110 GB of fresh buffers the GPU driver's wired collector otherwise
+#    hands the untouched ones to the compressor (145 GiB seen; with Time Machine's file cache beside it, jetsam then
+#    killed ~300 system daemons and the server);
+#  - --vision on the native engine: the checkpoint's image tower (families/glm/vision.zig, glm_vision.metal), image
+#    decoding and the processor (families/glm/image.zig), data-URL image_url parts expanded to each image's tokens
+#    (server/images.zig), the rows injected over the placeholders' embeddings in the prompt pass.
+#  - a request with a temperature is served greedily (the native GLM engine decodes greedily only), not failed:
+#    clients such as hermes always send one.
+patch = "glm-one-mac-vision-v1.0.4.patch"
+patch_sha256 = "f3568f28ee49d3f7c5cad7ac405b661730187c1752c8d166bcb72a2a52c27f87"
+zig = "~/.local/zig/zig"                 # Zig 0.17.0 (.zig-version in the checkout)
+zig_cpu = "apple_m1"
+binary = ""                              # a prebuilt tensorfold-native to serve with instead of the pinned build
+
+[local]
+host = "127.0.0.1"
+port = 8888                      # 8080 is taken by everything else
+hf_cache = "~/.cache/huggingface"
+tf_cache = "~/.cache/tensorfold-glm53"
+request_log = ""                         # a file for TENSORFOLD_REQUEST_LOG; empty logs no requests
+
+[serve]
+profile = "chat"                 # chat (MTP drafts) | reference (--no-drafts, the exactness reference)
+# the window: GLM's engine default is 131,072 of the checkpoint's 1,048,576; the caches grow with it (6.3 GB at 131k)
+context = 131072
+parallel = 1                     # streams admitted at once (shared lanes); 1 is one reply at a time
+drafts = true
+thinking = true                  # GLM-5.3 reasons first (reasoning_content); a request can send chat_template_kwargs {"enable_thinking": false}
+max_tokens = 32768
+temperature = "0"                # the native GLM engine decodes greedily only: a request at the checkpoint's 1.0 is refused
+prompt_cache_gib = 4             # kept prompt states, bounded so the load stays predictable; -1 the engine's default, 0 off
+learn = false                    # shared prompt prefixes on disk (GLM has it in v1.0.3); learn_dir and learn_gib below
+learn_dir = ""                   # "" the engine's ~/.cache/tensorfold/learned
+learn_gib = 32
+keep_warm = 900
+compact_at = ""
+dashboard = true
+# image input (the patch's --vision): data:-URL image_url parts in user messages, decoded and run through the tower
+# natively; the tower takes ~0.9 GiB and its scratch ~1.2 GiB for vision_image_tokens (4096 tokens: 16,384 patches)
+vision = true
+vision_image_tokens = 4096       # the visual tokens a request's images share (each image at most this; "low" detail 256)
+vision_max_images = 4
+api_key = ""
+extra_args = ""
+extra_env = ""
+# memory: the engine refuses a one-Mac load past TENSORFOLD_MEMORY_LIMIT_GB (patched; stock: 70% of RAM). 200 GB holds
+# the 180.6 GB of weights and the caches of a 131k window with room; `up` also refuses when free memory is under the
+# engine's floor plus memory_margin_gib, and the watchdog below kills the server before the Mac swaps.
+memory_limit_gb = 200
+residency = true                 # GLM_RESIDENCY and GLM_WIRE: the model resident and wired before its reads
+memory_margin_gib = 8
+memguard = true
+memguard_min_free_gib = 6        # free + inactive + speculative pages
+memguard_max_swap_growth_mb = 12288 # backstop: swap growth since start (a healthy load pages ~3 GB of other apps out);
+                                    # macOS's critical pressure level for 30 s also kills
+memguard_max_compressor_growth_gib = 24  # the compressor's growth: with the model wired nothing of it compresses, so
+                                         # growth is other memory squeezed (kills after two readings)
+
+[profiles.chat]
+drafts = true
+
+[profiles.reference]
+drafts = false
+
+# The Spark recipe's quality suite and decode ruler run against any OpenAI-compatible URL. `python3 -m mac suite|ruler`
+# clones it at this commit under .external/ (git-ignored) and runs them there; nothing of it is copied into this tree.
+[external]
+spark_recipe_repo = "https://github.com/BobClawblaw/qwen38-flashnext-int4mixed-2x-dgx-sparks.git"
+spark_recipe_sha = "8a7f4c80f146aeb14eaf7a7002cb07b5ad2fef53"

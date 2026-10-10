@@ -1,0 +1,11 @@
+{
+ "name": "gsm8k",
+ "score": 0.0,
+ "cases": 0,
+ "passed": 0,
+ "seconds": 0.015857219696044922,
+ "notes": [
+  "failed: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issue"
+ ],
+ "details": {}
+}

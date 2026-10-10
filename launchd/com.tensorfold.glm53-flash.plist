@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Autostart at login. Install (from the recipe folder; port and paths come from local.toml):
+       sed -e "s|/opt/recipe|$PWD|g" -e "s|USER|$USER|g" launchd/com.tensorfold.glm53-flash.plist \
+         > ~/Library/LaunchAgents/com.tensorfold.glm53-flash.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tensorfold.glm53-flash.plist
+     Stop / remove: launchctl bootout gui/$(id -u)/com.tensorfold.glm53-flash
+     `up --foreground` runs the checks, starts the memory watchdog on its own pid, then execs tensorfold-native as this
+     job, so KeepAlive restarts the server after a stop or a watchdog kill (ThrottleInterval apart). -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.tensorfold.glm53-flash</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>-m</string>
+    <string>mac</string>
+    <string>up</string>
+    <string>--foreground</string>
+    <string>--no-download</string>
+  </array>
+  <key>WorkingDirectory</key><string>/opt/recipe</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>/Users/USER</string>
+    <key>PATH</key><string>/Users/USER/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+  <key>StandardOutPath</key><string>/Users/USER/.cache/tensorfold-glm53/launchd.log</string>
+  <key>StandardErrorPath</key><string>/Users/USER/.cache/tensorfold-glm53/launchd.log</string>
+</dict>
+</plist>

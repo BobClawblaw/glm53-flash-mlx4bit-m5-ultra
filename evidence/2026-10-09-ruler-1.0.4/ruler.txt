@@ -1,0 +1,5 @@
+ruler: http://0.0.0.0:8888, max_tokens 256, 3 runs, median per stream / aggregate tok/s, ttft median
+  c=1   prose         93.3 /    93.3 tok/s   ttft 0.25s   256 tokens a reply
+  c=1   code         104.6 /   104.6 tok/s   ttft 0.29s   256 tokens a reply
+  c=1   structured   104.2 /   104.2 tok/s   ttft 0.29s   173 tokens a reply
+  c=1   list          89.7 /    89.7 tok/s   ttft 0.23s   256 tokens a reply

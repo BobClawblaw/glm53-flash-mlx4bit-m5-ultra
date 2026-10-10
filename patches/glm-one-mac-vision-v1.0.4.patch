@@ -1,0 +1,2473 @@
+diff --git a/build.zig b/build.zig
+index 9f8e9a2..ba87b00 100644
+--- a/build.zig
++++ b/build.zig
+@@ -369,6 +369,7 @@ fn metalTargets(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.b
+         .{ .name = "tf-grid-sync-bench", .path = "zig/tests/grid_sync_bench.zig", .about = "A GPU-wide barrier in one persistent dispatch against dependent relaunches" },
+         .{ .name = "tf-weight-read-check", .path = "zig/tests/weight_read_check.zig", .about = "Check native file reads and failed-read cleanup", .c_source = "zig/tests/pread_fault.c" },
+         .{ .name = "tf-glm-run", .path = "zig/tests/glm_run.zig", .about = "GLM-5.3-Flash greedy replies at each draft depth against depth 0 and reference tokens" },
++        .{ .name = "tf-glm-vision", .path = "zig/tests/glm_vision.zig", .about = "GLM-5.3-Flash's image tower on an image or a reference dump's patches, compared with the dump" },
+         .{ .name = "tf-glm-attn-probe", .path = "zig/tests/glm_attn_probe.zig", .about = "GLM-5.3-Flash's dense latent attention kernels on given inputs (scores, probabilities, outputs)" },
+         .{ .name = "tf-qwen36-row-seam", .path = "zig/tests/qwen36_row_seam.zig", .about = "Model-free fixture: the row projection's bias sums stay fp32 at every width" },
+     };
+@@ -497,6 +498,8 @@ fn metalEngineModules(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
+     metal.linkFramework("Metal", .{});
+     metal.linkFramework("Foundation", .{});
+     metal.linkFramework("IOSurface", .{}); // the Neural Engine's prompt share passes IOSurfaces
++    metal.linkFramework("ImageIO", .{}); // GLM-5.3-Flash's image input: decoding (families/glm/image.zig)
++    metal.linkFramework("CoreGraphics", .{});
+     metal.linkSystemLibrary("objc", .{});
+     const lanes = b.createModule(.{ .root_source_file = b.path("zig/src/core/lanes/lanes.zig"), .target = target, .optimize = optimize, .link_libc = true });
+     const fabric = b.createModule(.{ .root_source_file = b.path("zig/src/fabric/fabric.zig"), .target = target, .optimize = optimize, .link_libc = true });
+diff --git a/zig/kernels/metal/glm_vision.metal b/zig/kernels/metal/glm_vision.metal
+new file mode 100644
+index 0000000..c0fcc51
+--- /dev/null
++++ b/zig/kernels/metal/glm_vision.metal
+@@ -0,0 +1,229 @@
++// GLM-5.3-Flash's image tower (GLM5-Next vision: 24 pre-norm blocks of 1024, 16 heads of 64, 2-D rotary, a 2x2 merge
++// and a SwiGLU merger to the language model's 4096). Compiled after prefill/gemm_nax.metal, whose tfp::gemm_nax runs
++// every projection; the rest is MLX's per-op arithmetic as mlx-vlm's glm5_next/vision.py runs it in bf16.
++
++// ---- the projections and attention products: tfp::gemm_nax (bm64 bn128 bk256 wm2 wn4) by operand layout ----
++#define GLMV_GEMM(NAME, T, TA, TB, AM, AN)                                                                         \
++  [[max_total_threads_per_threadgroup(256)]] [[kernel]] void NAME(                                                \
++      const device T* A [[buffer(0)]], const device T* B [[buffer(1)]], const device int32_t* P [[buffer(2)]],     \
++      device T* D [[buffer(3)]], uint sg [[simdgroup_index_in_threadgroup]],                                      \
++      uint lane [[thread_index_in_simdgroup]], uint3 tg [[threadgroup_position_in_grid]]) {                        \
++    tfp::gemm_nax<T, TA, TB, AM, AN, false, 64, 128, 256, 2, 4>(A, B, D, P, tg, sg, lane);                         \
++  }
++// x [M, K] w^T: every linear layer (bf16 in and out, fp32 sums)
++GLMV_GEMM(glmv_gemm_bf16_nt_00, bfloat16_t, false, true, false, false)
++GLMV_GEMM(glmv_gemm_bf16_nt_01, bfloat16_t, false, true, false, true)
++GLMV_GEMM(glmv_gemm_bf16_nt_10, bfloat16_t, false, true, true, false)
++GLMV_GEMM(glmv_gemm_bf16_nt_11, bfloat16_t, false, true, true, true)
++// q k^T per head in fp32 (the scores MLX's attention keeps in fp32)
++GLMV_GEMM(glmv_gemm_f32_nt_00, float, false, true, false, false)
++GLMV_GEMM(glmv_gemm_f32_nt_01, float, false, true, false, true)
++GLMV_GEMM(glmv_gemm_f32_nt_10, float, false, true, true, false)
++GLMV_GEMM(glmv_gemm_f32_nt_11, float, false, true, true, true)
++// p v per head in fp32
++GLMV_GEMM(glmv_gemm_f32_nn_00, float, false, false, false, false)
++GLMV_GEMM(glmv_gemm_f32_nn_01, float, false, false, false, true)
++GLMV_GEMM(glmv_gemm_f32_nn_10, float, false, false, true, false)
++GLMV_GEMM(glmv_gemm_f32_nn_11, float, false, false, true, true)
++
++struct GlmvRows {
++  uint rows;
++  uint width;
++  float eps;
++};
++
++inline float glmv_bf(float x) { return float(bfloat(x)); }
++
++// One threadgroup's sum of every thread's `v` (at most 1024 threads), returned to all of them.
++inline float glmv_group_sum(float v, threadgroup float* part, uint t, uint n, uint lane, uint sg) {
++  v = simd_sum(v);
++  if (lane == 0) part[sg] = v;
++  threadgroup_barrier(mem_flags::mem_threadgroup);
++  if (sg == 0) {
++    float s = lane < (n + 31) / 32 ? part[lane] : 0.0f;
++    s = simd_sum(s);
++    if (lane == 0) part[32] = s;
++  }
++  threadgroup_barrier(mem_flags::mem_threadgroup);
++  const float out = part[32];
++  threadgroup_barrier(mem_flags::mem_threadgroup);
++  return out;
++}
++
++// y[r, c] = y + b[c] (a linear layer's bias, added after its product as nn.Linear's bf16 add rounds it)
++[[kernel]] void glmv_bias(device bfloat* y [[buffer(0)]], const device bfloat* b [[buffer(1)]],
++                          constant uint& width [[buffer(2)]], uint2 at [[thread_position_in_grid]]) {
++  const ulong i = ulong(at.y) * width + at.x;
++  y[i] = bfloat(float(y[i]) + float(b[at.x]));
++}
++
++// x += y (a block's residual)
++[[kernel]] void glmv_add(device bfloat* x [[buffer(0)]], const device bfloat* y [[buffer(1)]],
++                         uint i [[thread_position_in_grid]]) {
++  x[i] = bfloat(float(x[i]) + float(y[i]));
++}
++
++// mx.fast.rms_norm, one threadgroup a row: w * bf16(x * rsqrt(mean(x^2) + eps))
++[[kernel]] void glmv_rms(const device bfloat* x [[buffer(0)]], const device bfloat* w [[buffer(1)]],
++                         device bfloat* y [[buffer(2)]], constant GlmvRows& p [[buffer(3)]],
++                         uint row [[threadgroup_position_in_grid]], uint t [[thread_position_in_threadgroup]],
++                         uint n [[threads_per_threadgroup]], uint lane [[thread_index_in_simdgroup]],
++                         uint sg [[simdgroup_index_in_threadgroup]]) {
++  threadgroup float part[33];
++  const device bfloat* xr = x + ulong(row) * p.width;
++  device bfloat* yr = y + ulong(row) * p.width;
++  float s = 0.0f;
++  for (uint i = t; i < p.width; i += n) {
++    const float v = float(xr[i]);
++    s += v * v;
++  }
++  s = glmv_group_sum(s, part, t, n, lane, sg);
++  const float inv = metal::precise::rsqrt(s / float(p.width) + p.eps);
++  for (uint i = t; i < p.width; i += n) yr[i] = bfloat(float(w[i]) * glmv_bf(float(xr[i]) * inv));
++}
++
++// mx.fast.layer_norm with weight and bias, one threadgroup a row: w * bf16((x - mean) * rsqrt(var + eps)) + b
++[[kernel]] void glmv_layer_norm(const device bfloat* x [[buffer(0)]], const device bfloat* w [[buffer(1)]],
++                                const device bfloat* b [[buffer(2)]], device bfloat* y [[buffer(3)]],
++                                constant GlmvRows& p [[buffer(4)]], uint row [[threadgroup_position_in_grid]],
++                                uint t [[thread_position_in_threadgroup]], uint n [[threads_per_threadgroup]],
++                                uint lane [[thread_index_in_simdgroup]], uint sg [[simdgroup_index_in_threadgroup]]) {
++  threadgroup float part[33];
++  const device bfloat* xr = x + ulong(row) * p.width;
++  device bfloat* yr = y + ulong(row) * p.width;
++  float s = 0.0f;
++  for (uint i = t; i < p.width; i += n) s += float(xr[i]);
++  const float mean = glmv_group_sum(s, part, t, n, lane, sg) / float(p.width);
++  float v = 0.0f;
++  for (uint i = t; i < p.width; i += n) {
++    const float d = float(xr[i]) - mean;
++    v += d * d;
++  }
++  const float inv = metal::precise::rsqrt(glmv_group_sum(v, part, t, n, lane, sg) / float(p.width) + p.eps);
++  for (uint i = t; i < p.width; i += n) {
++    yr[i] = bfloat(glmv_bf(float(w[i]) * glmv_bf((float(xr[i]) - mean) * inv)) + float(b[i]));
++  }
++}
++
++struct GlmvQkv {
++  uint L;     // rows (patches) of this image
++  float eps;  // the q and k norms'
++};
++
++// One simdgroup per (row, head, q|k|v) of qkv [L, 3, 16, 64]: q and k RMS-normed, rotated by the row's 2-D angles
++// (cos and sin [L, 64]: the height's 16 frequencies, then the width's, twice), and written head-major in fp32
++// ([16, L, 64], each value a bf16 as MLX hands its attention); v as stored.
++[[kernel]] void glmv_qkv(const device bfloat* qkv [[buffer(0)]], const device bfloat* qn [[buffer(1)]],
++                         const device bfloat* kn [[buffer(2)]], const device float* cs [[buffer(3)]],
++                         const device float* sn [[buffer(4)]], device float* Q [[buffer(5)]],
++                         device float* K [[buffer(6)]], device float* V [[buffer(7)]],
++                         constant GlmvQkv& p [[buffer(8)]], uint g [[threadgroup_position_in_grid]],
++                         uint lane [[thread_index_in_simdgroup]]) {
++  const uint which = g % 3, h = (g / 3) % 16, r = g / 48;
++  const device bfloat* src = qkv + ulong(r) * 3072 + which * 1024 + h * 64;
++  const ulong out = (ulong(h) * p.L + r) * 64;
++  const float a = float(src[lane]), b = float(src[lane + 32]);
++  if (which == 2) {
++    V[out + lane] = a;
++    V[out + lane + 32] = b;
++    return;
++  }
++  const device bfloat* w = which == 0 ? qn : kn;
++  const float inv = metal::precise::rsqrt(simd_sum(a * a + b * b) / 64.0f + p.eps);
++  const float na = glmv_bf(float(w[lane]) * glmv_bf(a * inv));
++  const float nb = glmv_bf(float(w[lane + 32]) * glmv_bf(b * inv));
++  const device float* c = cs + ulong(r) * 64;
++  const device float* s = sn + ulong(r) * 64;
++  device float* dst = which == 0 ? Q : K;
++  dst[out + lane] = glmv_bf(na * c[lane] - nb * s[lane]);
++  dst[out + lane + 32] = glmv_bf(nb * c[lane + 32] + na * s[lane + 32]);
++}
++
++// Each row of S [rows, n] (fp32 scores) as softmax(scale * s), in place; one threadgroup a row.
++[[kernel]] void glmv_softmax(device float* S [[buffer(0)]], constant uint& n [[buffer(1)]],
++                             constant float& scale [[buffer(2)]], uint row [[threadgroup_position_in_grid]],
++                             uint t [[thread_position_in_threadgroup]], uint tn [[threads_per_threadgroup]],
++                             uint lane [[thread_index_in_simdgroup]], uint sg [[simdgroup_index_in_threadgroup]]) {
++  threadgroup float part[33];
++  device float* s = S + ulong(row) * n;
++  float m = -INFINITY;
++  for (uint i = t; i < n; i += tn) m = max(m, s[i] * scale);
++  m = simd_max(m);
++  if (lane == 0) part[sg] = m;
++  threadgroup_barrier(mem_flags::mem_threadgroup);
++  if (sg == 0) {
++    float v = lane < (tn + 31) / 32 ? part[lane] : -INFINITY;
++    v = simd_max(v);
++    if (lane == 0) part[32] = v;
++  }
++  threadgroup_barrier(mem_flags::mem_threadgroup);
++  m = part[32];
++  threadgroup_barrier(mem_flags::mem_threadgroup);
++  float z = 0.0f;
++  for (uint i = t; i < n; i += tn) {
++    const float e = metal::precise::exp(s[i] * scale - m);
++    s[i] = e;
++    z += e;
++  }
++  const float inv = 1.0f / glmv_group_sum(z, part, t, tn, lane, sg);
++  for (uint i = t; i < n; i += tn) s[i] *= inv;
++}
++
++// O [16, rows, 64] (fp32, one chunk's attention) into rows [r0, r0 + rows) of out [L, 1024] (bf16, heads side by side)
++[[kernel]] void glmv_heads(const device float* O [[buffer(0)]], device bfloat* out [[buffer(1)]],
++                           constant uint2& p [[buffer(2)]], uint2 at [[thread_position_in_grid]]) {
++  const uint rows = p.x, r0 = p.y, h = at.x / 64, d = at.x % 64, r = at.y;
++  out[ulong(r0 + r) * 1024 + at.x] = bfloat(O[(ulong(h) * rows + r) * 64 + d]);
++}
++
++// The vision MLP's and merger's gate: silu(min(g, limit)) * clip(u, -limit, limit), each op rounded as MLX does.
++// gu: g then u, `width` each, a row at a time (stride 2 * width); act [rows, width].
++[[kernel]] void glmv_swiglu(const device bfloat* g [[buffer(0)]], const device bfloat* u [[buffer(1)]],
++                            device bfloat* act [[buffer(2)]], constant float& limit [[buffer(3)]],
++                            uint i [[thread_position_in_grid]]) {
++  const float gate = glmv_bf(min(float(g[i]), limit));
++  const float up = glmv_bf(clamp(float(u[i]), -limit, limit));
++  const float sig = glmv_bf(1.0f / (1.0f + metal::precise::exp(-gate)));
++  act[i] = bfloat(glmv_bf(gate * sig) * up);
++}
++
++// erf to fp32 precision (W. J. Cody's rational approximations, as libm's erff).
++inline float glmv_erf(float x) {
++  const float ax = fabs(x);
++  if (ax < 0.84375f) {
++    const float z = x * x;
++    const float r = 1.28379167e-01f + z * (-3.25042108e-01f + z * (-2.84817495e-02f + z * (-5.77027029e-03f + z * -2.37630166e-05f)));
++    const float s = 1.0f + z * (3.97917233e-01f + z * (6.50222499e-02f + z * (5.08130628e-03f + z * (1.32494738e-04f + z * -3.96022827e-06f))));
++    return x + x * (r / s);
++  }
++  if (ax < 1.25f) {
++    const float s = ax - 1.0f;
++    const float P = -2.36211857e-03f + s * (4.14856106e-01f + s * (-3.72207481e-01f + s * (3.18346620e-01f + s * (-1.10894694e-01f + s * (3.54783031e-02f + s * -2.16637559e-03f)))));
++    const float Q = 1.0f + s * (1.06420882e-01f + s * (5.40397942e-01f + s * (7.18286547e-02f + s * (1.26171216e-01f + s * (1.36370836e-02f + s * 1.19844998e-02f)))));
++    const float e = 8.45062911e-01f + P / Q;
++    return x >= 0 ? e : -e;
++  }
++  if (ax >= 6.0f) return x >= 0 ? 1.0f : -1.0f;
++  const float s = 1.0f / (ax * ax);
++  float R, S;
++  if (ax < 1.0f / 0.35f) {
++    R = -9.86494403e-03f + s * (-6.93858570e-01f + s * (-1.05586262e+01f + s * (-6.23753357e+01f + s * (-1.62396660e+02f + s * (-1.84605087e+02f + s * (-8.12874374e+01f + s * -9.81432934e+00f))))));
++    S = 1.0f + s * (1.96512714e+01f + s * (1.37657754e+02f + s * (4.34565887e+02f + s * (6.45387268e+02f + s * (4.29008148e+02f + s * (1.08635002e+02f + s * (6.57024977e+00f + s * -6.04244141e-02f)))))));
++  } else {
++    R = -9.86494310e-03f + s * (-7.99283242e-01f + s * (-1.77579556e+01f + s * (-1.60636383e+02f + s * (-6.37566467e+02f + s * (-1.02509509e+03f + s * -4.83519196e+02f)))));
++    S = 1.0f + s * (3.03380604e+01f + s * (3.25792511e+02f + s * (1.53672961e+03f + s * (3.19985820e+03f + s * (2.55305029e+03f + s * (4.74528534e+02f + s * -2.24409515e+01f))))));
++  }
++  const float zh = as_type<float>(as_type<uint>(ax) & 0xfffff000u);
++  const float r = metal::precise::exp(-zh * zh - 0.5625f) * metal::precise::exp((zh - ax) * (zh + ax) + R / S);
++  const float e = 1.0f - r / ax;
++  return x >= 0 ? e : -e;
++}
++
++// nn.gelu (exact): x * (1 + erf(x / sqrt(2))) / 2, each op rounded to bf16 as the compiled MLX graph does
++[[kernel]] void glmv_gelu(device bfloat* x [[buffer(0)]], uint i [[thread_position_in_grid]]) {
++  const float v = float(x[i]);
++  const float t = glmv_bf(v / 1.41421356237309504880f);
++  const float e = glmv_bf(glmv_erf(t));
++  const float w = glmv_bf(v * glmv_bf(1.0f + e));
++  x[i] = bfloat(w / 2.0f);
++}
+diff --git a/zig/kernels/metal/sources.zig b/zig/kernels/metal/sources.zig
+index 815b300..f09f264 100644
+--- a/zig/kernels/metal/sources.zig
++++ b/zig/kernels/metal/sources.zig
+@@ -70,6 +70,8 @@ pub const glm = @import("glm/kernels.zig");
+ pub const glm_glue = @embedFile("glm_glue.metal");
+ /// GLM-5.3-Flash's latent attention for rows that read every key: 64 heads as one matrix on the tensor units.
+ pub const glm_attn = @embedFile("glm_attn.metal");
++/// GLM-5.3-Flash's image tower: the prefill GEMM template's projections and attention products, then its own steps.
++pub const glm_vision = @embedFile("prefill/gemm_nax.metal") ++ @embedFile("glm_vision.metal");
+ /// A prompt chunk's KDA layer in three passes, appended to the generated kda_rows source (its helpers).
+ pub const glm_kda_prompt = @embedFile("glm_kda_prompt.metal");
+ /// GLM-5.3-Flash speed-up mode's exchange kernels (families/glm/ep.zig).
+diff --git a/zig/src/core/engine_api.zig b/zig/src/core/engine_api.zig
+index 3ffe291..d863687 100644
+--- a/zig/src/core/engine_api.zig
++++ b/zig/src/core/engine_api.zig
+@@ -9,6 +9,9 @@ pub const Id = u64;
+ /// One request's sampling (Python's exact_sampling.Sampling); a request without one decodes greedily.
+ pub const Sampling = lanes.Sampling;
+ 
++/// One image of a request (``Request.images``): the tower's input and the placeholder rows its output replaces.
++pub const Image = lanes.stream.Image;
++
+ /// A prompt's reproducible seed (``seed_for``), for requests that name none.
+ pub const seedFor = lanes.sampling.seedFor;
+ 
+@@ -69,8 +72,31 @@ pub const Request = struct {
+     structure: ?Structure = null,
+     /// Stop a short exact cycle while the think block is open.
+     loop_guard: bool = false,
++    /// Images whose rows replace placeholder tokens of ``prompt``, in order; only an engine whose ``Info.vision`` is set.
++    images: []const Image = &.{},
++    /// The prompt as the prompt cache matches it (each image's placeholders by its content); empty: ``prompt``.
++    cache_key: []const u32 = &.{},
++};
++
++/// An image prepared for the engine's tower (``Vision.prepare``): patches, patch grid, tokens and a content hash.
++pub const PreparedImage = struct { pixels: []f32, gh: u32, gw: u32, tokens: u32, hash: u64 };
++
++/// Image input an engine serves (``Info.vision``): how the server turns an image's bytes into tower input and what
++/// a request may hold.
++pub const Vision = struct {
++    ctx: *anyopaque,
++    /// The image's bytes (any format the platform decodes) at most ``max_tokens`` tokens; allocated in ``a``.
++    prepare: *const fn (ctx: *anyopaque, a: Allocator, bytes: []const u8, max_tokens: u32) anyerror!PreparedImage,
++    /// The token the chat template writes once per image, expanded to the image's tokens.
++    image_token: u32,
++    /// Image tokens one request may hold in all, and images.
++    image_tokens: u32,
++    max_images: u32,
+ };
+ 
++/// --vision: image input's limits (``Open.vision``).
++pub const VisionOpen = struct { image_tokens: u32 = 4096, max_images: u32 = 4 };
++
+ pub const Reason = enum { stop, length, cancelled, failed };
+ 
+ /// What a finished reply's rounds did, for its runtime fields and /metrics.
+@@ -127,6 +153,10 @@ pub const Info = struct {
+     plain_only: bool = false,
+     /// The immutable retained-prefix plan applied at startup, not a process memory limit or current cache occupancy.
+     prompt_cache_plan: ?PromptCachePlan = null,
++    /// Image input (--vision); null: text only.
++    vision: ?Vision = null,
++    /// The engine decodes greedily only: the server serves a sampled request greedily instead of failing it.
++    greedy_only: bool = false,
+ };
+ 
+ pub const PromptCachePlan = struct {
+@@ -169,6 +199,8 @@ pub const Open = struct {
+     /// --device and --segments (CUDA); null: the backend's environment fallback, then its default.
+     device: ?u32 = null,
+     segments: ?u32 = null,
++    /// --vision: load the checkpoint's image tower (null: text only; an engine without one refuses).
++    vision: ?VisionOpen = null,
+ };
+ 
+ /// An opened engine; ``close`` stops its thread and frees its backend.
+diff --git a/zig/src/core/lane_host.zig b/zig/src/core/lane_host.zig
+index 2b0e8e2..d90e1bb 100644
+--- a/zig/src/core/lane_host.zig
++++ b/zig/src/core/lane_host.zig
+@@ -16,6 +16,11 @@ const Reason = api.Reason;
+ const Stats = api.Stats;
+ const SubmitError = api.SubmitError;
+ 
++/// The prompt as the prompt cache matches it: an image request's placeholders stand for their images.
++fn cacheKey(r: *const api.Request) []const u32 {
++    return if (r.cache_key.len > 0) r.cache_key else r.prompt;
++}
++
+ pub const LaneHost = struct {
+     gpa: Allocator,
+     io: std.Io,
+@@ -69,7 +74,7 @@ pub const LaneHost = struct {
+         fn kept(ptr: *anyopaque, s: *lanes.Stream, at: u32) void {
+             const job: *Job = @ptrCast(@alignCast(ptr));
+             job.reported(); // before a keep can evict the entry the pass restored
+-            if (job.host.cache) |store| _ = store.keep(job.request.prompt, at, s, job.request.chunks, &.{});
++            if (job.host.cache) |store| _ = store.keep(cacheKey(job.request), at, s, job.request.chunks, &.{});
+         }
+ 
+         /// Report a restored prefix or its failed copy; an untouched prefix remains kept.
+@@ -79,7 +84,7 @@ pub const LaneHost = struct {
+             const store = job.host.cache orelse return;
+             if (!job.started) return;
+             job.stream.reuse.saved = null; // the backend restores before its first chunk; a later keep may free it
+-            if (job.stream.reuse_failed) store.resumed(e, job.request.prompt, false) else if (job.stream.cached == e.at) store.resumed(e, job.request.prompt, true);
++            if (job.stream.reuse_failed) store.resumed(e, cacheKey(job.request), false) else if (job.stream.cached == e.at) store.resumed(e, cacheKey(job.request), true);
+         }
+     };
+ 
+@@ -335,7 +340,7 @@ pub const LaneHost = struct {
+         const r = job.request;
+         var reuse: lanes.stream.Reuse = .{};
+         // the entry stays alive until the backend restores it: nothing keeps between here and this stream's own pass
+-        if (h.cache) |store| if (store.lookup(h.gpa, r.prompt, r.history_len, r.shared_prefixes, r.chunks, &.{})) |l| {
++        if (h.cache) |store| if (store.lookup(h.gpa, cacheKey(r), r.history_len, r.shared_prefixes, r.chunks, &.{})) |l| {
+             job.entry = l.entry;
+             job.kept0 = store.counts.kept;
+             job.marks = l.marks;
+@@ -358,6 +363,7 @@ pub const LaneHost = struct {
+             .loop_guard = r.loop_guard,
+             .chunks = r.chunks,
+             .reuse = reuse,
++            .images = r.images,
+         }) catch {
+             job.proposer.deinit();
+             return h.drop(job, "out of memory");
+diff --git a/zig/src/core/lanes/stream.zig b/zig/src/core/lanes/stream.zig
+index 3619e9a..9e9dfad 100644
+--- a/zig/src/core/lanes/stream.zig
++++ b/zig/src/core/lanes/stream.zig
+@@ -95,6 +95,10 @@ pub const Held = struct {
+     parents: ?[]i32 = null,
+ };
+ 
++/// One image of a prompt: the tower's input (patches [gh * gw, width], the family's layout) and the `tokens`
++/// placeholder rows from `at` its output replaces.
++pub const Image = struct { pixels: []const f32, gh: u32, gw: u32, at: u32, tokens: u32 };
++
+ pub const Spec = struct {
+     id: []const u8,
+     prompt: []const u32,
+@@ -112,6 +116,7 @@ pub const Spec = struct {
+     loop_guard: bool = false,
+     chunks: []const u32 = &.{}, // where prefill chunks start after 0 (Python's PrefillPlan); empty: the backend's step
+     reuse: Reuse = .{},
++    images: []const Image = &.{}, // in prompt order; the backend's tower fills their rows
+ };
+ 
+ pub const Stream = struct {
+@@ -132,6 +137,7 @@ pub const Stream = struct {
+     loop_period: ?u32 = null,
+     chunks: []const u32,
+     reuse: Reuse = .{},
++    images: []const Image = &.{},
+     cached: u32 = 0, // prompt tokens the backend restored from `reuse` (its prompt pass started there)
+     reuse_failed: bool = false, // the backend's restore of `reuse` failed: it prefilled from 0
+     context: std.ArrayList(u32) = .empty,
+@@ -184,6 +190,7 @@ pub const Stream = struct {
+             .loop_guard = spec.loop_guard,
+             .chunks = spec.chunks,
+             .reuse = spec.reuse,
++            .images = spec.images,
+         };
+         try s.context.appendSlice(gpa, spec.prompt);
+         return s;
+diff --git a/zig/src/families/glm/backend.zig b/zig/src/families/glm/backend.zig
+index 663132b..3540682 100644
+--- a/zig/src/families/glm/backend.zig
++++ b/zig/src/families/glm/backend.zig
+@@ -83,6 +83,11 @@ pub const Backend = struct {
+         try mirror.send(e, .begin, b.words.items);
+         try b.sl.begin(i, prompt, s.drafts);
+         s.cached = 0;
++        if (s.images.len > 0) { // the images through the tower first: the chunks inject their rows
++            if (e.ep != null) return error.VisionOnPair;
++            try b.sl.images(i, s.images);
++        }
++        defer if (s.images.len > 0) b.sl.endImages();
+         var at: u32 = 0;
+         if (s.reuse.saved) |saved| { // a kept state of this prompt's prefix: the pass starts there
+             const snap: *snapshot.Snap = @ptrCast(@alignCast(saved));
+diff --git a/zig/src/families/glm/checks.zig b/zig/src/families/glm/checks.zig
+index 1ec678d..54885d4 100644
+--- a/zig/src/families/glm/checks.zig
++++ b/zig/src/families/glm/checks.zig
+@@ -166,7 +166,7 @@ pub fn checkMatmul(e: *Engine, prompt: []const u32) !void {
+     const out = try e.arena.buffer(@as(usize, rows) * N * 2);
+     var x = e.ctx();
+     const b = e.begin();
+-    fwd.embed(&x, b.enc, e.prompt_ids, rows);
++    fwd.embed(&x, b.enc, e.prompt_ids, rows, 0);
+     fwd.boundary(&x, b.enc, rows, false, L.hc.?[0], L.in_norm);
+     fwd.qmv(&x, b.enc, e.k.qmv_kda_in, e.sc.normed, a.in_proj, out, rows);
+     affine_mm.rowSums(b.enc, e.k.mm_bf16, 64, e.sc.normed, pr.sums, rows, a.in_proj.k);
+diff --git a/zig/src/families/glm/engine.zig b/zig/src/families/glm/engine.zig
+index 0012e08..f62d071 100644
+--- a/zig/src/families/glm/engine.zig
++++ b/zig/src/families/glm/engine.zig
+@@ -3,6 +3,7 @@ const std = @import("std");
+ const mtl = @import("metal");
+ const cfg = @import("config.zig");
+ const wts = @import("weights.zig");
++const vision_mod = @import("vision.zig");
+ const st = @import("state.zig");
+ const fwd = @import("forward.zig");
+ const mtp = @import("mtp.zig");
+@@ -77,6 +78,9 @@ pub const Engine = struct {
+     rank_log: bool = false, // GLM_RANKS=1: each MTP depth's logits kept, and the target's rank in them where drafts miss
+     ep_arena: std.heap.ArenaAllocator, // the link settings, alive as long as the link
+     residency: ?mtl.ResidencySet = null,
++    vision: ?*vision_mod.Vision = null, // --vision: the image tower
++    vision_rows: Ref = undefined, // bf16 [image tokens, hidden]: a prompt's image rows (vision only)
++    vision_limits: vision_mod.Limits = .{},
+     keepalive_sets: [1]mtl.ResidencySet = undefined, // the residency set, for the idle keepalive's commit
+     keepalive_target: mtl.keepalive.Target = undefined, // the engine's queue, set at load for the server's ticker
+     load_seconds: f64 = 0,
+@@ -87,11 +91,12 @@ pub const Engine = struct {
+ 
+     /// The checkpoint in `dir`, caches for `cap` tokens; GLM_LAYERS=N: the first N layers only; GLM_EP=settings: half the experts.
+     pub fn load(gpa: std.mem.Allocator, dir: []const u8, cap: u32) !*Engine {
+-        return loadWith(gpa, dir, cap, if (std.c.getenv("GLM_EP")) |v| std.mem.span(v) else null, false);
++        return loadWith(gpa, dir, cap, if (std.c.getenv("GLM_EP")) |v| std.mem.span(v) else null, false, null);
+     }
+ 
+     /// `load` with expert parallel over the link in `ep_path` (this Mac's settings), or on one Mac when null.
+-    pub fn loadWith(gpa: std.mem.Allocator, dir: []const u8, cap: u32, ep_path: ?[]const u8, learn: bool) !*Engine {
++    /// `vision`: the image tower too, with scratch and rows for that many image tokens a prompt.
++    pub fn loadWith(gpa: std.mem.Allocator, dir: []const u8, cap: u32, ep_path: ?[]const u8, learn: bool, vision: ?vision_mod.Limits) !*Engine {
+         const e = try gpa.create(Engine); // undefined memory: every field is set below
+         errdefer gpa.destroy(e);
+         const pool = mtl.objc.Pool.push();
+@@ -100,6 +105,7 @@ pub const Engine = struct {
+         e.gpa = gpa;
+         e.ev = 0;
+         e.residency = null;
++        e.vision = null;
+         e.gpu = .{ 0, 0 };
+         e.fused_route = if (std.c.getenv("GLM_ROUTE")) |v| v[0] != '0' else true;
+         e.draft_vocab = if (std.c.getenv("GLM_DRAFT_VOCAB")) |v| std.fmt.parseInt(u32, std.mem.span(v), 10) catch 0 else 0;
+@@ -151,7 +157,7 @@ pub const Engine = struct {
+             gpa.destroy(e.k);
+         }
+         const plan_bytes = blk: { // the weights' plan from the headers: names, dtypes, shapes and bytes, nothing read
+-            const plan = try wts.load(gpa, e.device, dir, &e.c, 16, true);
++            const plan = try wts.load(gpa, e.device, dir, &e.c, 16, true, null, false);
+             defer gpa.destroy(plan);
+             defer plan.deinit();
+             break :blk plan.bytes;
+@@ -168,10 +174,18 @@ pub const Engine = struct {
+         errdefer if (e.pr) |*p| p.deinit();
+         const limit = loadLimit();
+         if (plan_bytes + e.arena.bytes > limit) { // refused before any weight is read: the floor's one-Mac limit
+-            std.log.err("glm: {d:.1} GB of weights and {d:.1} GB of caches pass this Mac's {d:.1} GB load limit (70% of RAM); load a layer subset or the expert-parallel pair", .{ @as(f64, @floatFromInt(plan_bytes)) / 1e9, @as(f64, @floatFromInt(e.arena.bytes)) / 1e9, @as(f64, @floatFromInt(limit)) / 1e9 });
++            std.log.err("glm: {d:.1} GB of weights and {d:.1} GB of caches pass this Mac's {d:.1} GB load limit (70% of RAM, or TENSORFOLD_MEMORY_LIMIT_GB); set that budget, load a layer subset or the expert-parallel pair", .{ @as(f64, @floatFromInt(plan_bytes)) / 1e9, @as(f64, @floatFromInt(e.arena.bytes)) / 1e9, @as(f64, @floatFromInt(limit)) / 1e9 });
+             return error.OverMemoryLimit;
+         }
+-        e.w = try wts.load(gpa, e.device, dir, &e.c, 16, false);
++        // opt-in: wiring 181 GB leaves macOS nothing to reclaim if another model shares the Mac (Flash Next runs without).
++        // The set is requested before the weights are read: past ~120 GB of fresh buffers on a 256 GB Mac the GPU driver's
++        // wired collector unwires the ones no command has touched and the VM compresses them (4-bit weights barely shrink).
++        const resident: ?mtl.ResidencySet = if (std.c.getenv("GLM_RESIDENCY") == null) null else e.device.residencySet(1024) catch null;
++        errdefer if (resident) |set| set.deinit();
++        // GLM_WIRE: every buffer's pages wired (mlock) before it fills, the caches first: nothing of the model compresses
++        const wire = std.c.getenv("GLM_WIRE") != null;
++        if (wire) for (e.arena.buffers.items) |b| try wts.wireBuffer(b);
++        e.w = try wts.load(gpa, e.device, dir, &e.c, 16, false, resident, wire);
+         errdefer {
+             e.w.deinit();
+             gpa.destroy(e.w);
+@@ -185,15 +199,35 @@ pub const Engine = struct {
+             me.rest[2] = @intFromBool(learn); // --learn on both Macs or neither: each holds its half of a learned state
+             e.ep = try ep_mod.Ep.init(gpa, e.device, s, me);
+         }
+-        // opt-in: wiring 181 GB leaves macOS nothing to reclaim if another model shares the Mac (Flash Next runs without)
+-        if (std.c.getenv("GLM_RESIDENCY") == null) {} else if (e.device.residencySet(e.w.buffers.items.len + e.arena.buffers.items.len)) |set| {
+-            for (e.w.buffers.items) |b| set.add(b);
++        if (vision) |lim| { // --vision: the tower and its rows (about 0.9 GiB of weights and the scratch its budget needs)
++            if (link != null) return error.VisionOnPair;
++            const pj: ?mtl.MappedFile = blk: {
++                const pp = try std.fmt.allocPrintSentinel(gpa, "{s}/processor_config.json", .{dir}, 0);
++                defer gpa.free(pp);
++                break :blk mtl.MappedFile.open(pp) catch null;
++            };
++            defer if (pj) |m| m.deinit();
++            var cfg_arena = std.heap.ArenaAllocator.init(gpa);
++            defer cfg_arena.deinit();
++            const vc = (try vision_mod.Config.parse(cfg_arena.allocator(), f.bytes[0..f.size], if (pj) |m| m.bytes[0..m.size] else null)) orelse return error.NoVisionTower;
++            e.vision = try vision_mod.Vision.load(gpa, e.device, dir, vc, lim.image_tokens);
++            e.vision_rows = try e.arena.buffer(@as(usize, lim.image_tokens) * e.c.hidden * 2);
++            if (wire) {
++                for (e.vision.?.buffers()) |b| try wts.wireBuffer(b);
++                try wts.wireBuffer(e.arena.buffers.items[e.arena.buffers.items.len - 1]);
++            }
++            e.vision_limits = lim;
++            std.log.info("glm: image tower loaded ({d:.2} GiB with scratch for {d} image tokens a prompt)", .{ @as(f64, @floatFromInt(e.vision.?.bytes)) / (1 << 30), lim.image_tokens });
++        }
++        errdefer if (e.vision) |v| v.deinit();
++        if (resident) |set| { // the weights joined before their reads; the caches and scratch join here
+             for (e.arena.buffers.items) |b| set.add(b);
++            if (e.vision) |v| for (v.buffers()) |b| set.add(b);
+             set.commit();
+             set.requestResidency();
+             e.queue.addResidencySet(set);
+             e.residency = set;
+-        } else |_| {}
++        }
+         // every Metal engine offers its queue to the idle keepalive; the sets list only when the model is resident
+         if (e.residency) |set| e.keepalive_sets[0] = set;
+         e.keepalive_target = .{ .queue = e.queue, .sets = if (e.residency != null) &e.keepalive_sets else &.{} };
+@@ -221,11 +255,33 @@ pub const Engine = struct {
+     }
+ 
+     /// The most this Mac may load: 70% of its RAM in GiB, read as GB (the floor's 179 GB on a 256 GiB Mac, the strict reading).
++    /// TENSORFOLD_MEMORY_LIMIT_GB, the Python engine's budget variable, names an explicit limit in GB instead, at most
++    /// 90% of RAM: the whole 4-bit checkpoint (180.6 GB of weights) then serves on one 256 GB Mac when its owner says so.
+     pub fn loadLimit() usize {
+         var mem: u64 = 0;
+         var len: usize = @sizeOf(u64);
+         if (std.c.sysctlbyname("hw.memsize", &mem, &len, null, 0) != 0 or mem == 0) return 0;
+-        return @intFromFloat(@as(f64, @floatFromInt(mem)) / (1 << 30) * 0.7 * 1e9);
++        return loadLimitOf(mem, if (std.c.getenv("TENSORFOLD_MEMORY_LIMIT_GB")) |v| std.mem.span(v) else null);
++    }
++
++    /// `ram` bytes and the budget variable's text: the explicit GB when it parses to a positive number, else 70%.
++    pub fn loadLimitOf(ram: u64, budget: ?[]const u8) usize {
++        const bytes: f64 = @floatFromInt(ram);
++        if (budget) |text| {
++            const gb = std.fmt.parseFloat(f64, std.mem.trim(u8, text, " \t")) catch 0;
++            if (gb > 0 and std.math.isFinite(gb)) return @intFromFloat(@min(gb * 1e9, bytes * 0.9));
++        }
++        return @intFromFloat(bytes / (1 << 30) * 0.7 * 1e9);
++    }
++
++    test "the one-Mac load limit: 70% of RAM, or TENSORFOLD_MEMORY_LIMIT_GB capped at 90%" {
++        const ram: u64 = 256 << 30;
++        try std.testing.expectEqual(@as(usize, 179_200_000_000), loadLimitOf(ram, null));
++        try std.testing.expectEqual(@as(usize, 200_000_000_000), loadLimitOf(ram, "200"));
++        try std.testing.expectEqual(@as(usize, 190_500_000_000), loadLimitOf(ram, " 190.5 "));
++        try std.testing.expectEqual(@as(usize, @intFromFloat(@as(f64, @floatFromInt(ram)) * 0.9)), loadLimitOf(ram, "100000"));
++        try std.testing.expectEqual(@as(usize, 179_200_000_000), loadLimitOf(ram, "0"));
++        try std.testing.expectEqual(@as(usize, 179_200_000_000), loadLimitOf(ram, "nope"));
+     }
+ 
+     /// The KDA decay rates A = exp(A_log) with MLX's Exp, on the GPU.
+@@ -258,6 +314,7 @@ pub const Engine = struct {
+             set.deinit();
+         }
+         if (e.ep) |ep| ep.deinit(gpa);
++        if (e.vision) |v| v.deinit();
+         e.ep_arena.deinit();
+         if (e.pr) |*p| p.deinit();
+         e.arena.deinit();
+diff --git a/zig/src/families/glm/forward.zig b/zig/src/families/glm/forward.zig
+index 4670e79..7c06b77 100644
+--- a/zig/src/families/glm/forward.zig
++++ b/zig/src/families/glm/forward.zig
+@@ -30,8 +30,29 @@ pub const Ctx = struct {
+     draft_vocab: u32 = 154880, // the MTP head's tokens: the vocabulary's first this many
+     m_row: u32 = 0, // the MTP head's logits row in m_logits (a rank log keeps each depth's in its own row)
+     segs: []const Seg = &.{}, // a shared window's streams in row order (empty: every row is `s`'s)
++    inject: ?*const Inject = null, // a prompt pass's image rows over its placeholder embeddings
+ };
+ 
++/// An image prompt's tower output: prompt rows [at, at + n) of each span embed as rows [row, row + n) of `rows`.
++pub const Inject = struct { rows: Ref, spans: []const Span };
++pub const Span = struct { at: u32, n: u32, row: u32 };
++
++/// The image rows among `rows` embedding rows (prompt positions pos..) written over `out`; nothing without an injection.
++pub fn inject(x: *const Ctx, e: mtl.ComputeEncoder, out: Ref, rows: u32, pos: u32) void {
++    const inj = x.inject orelse return;
++    const D: usize = x.c.hidden;
++    for (inj.spans) |sp| {
++        const lo = @max(sp.at, pos);
++        const hi = @min(sp.at + sp.n, pos + rows);
++        if (lo >= hi) continue;
++        const n: usize = hi - lo;
++        e.setPipeline(x.k.copy_u32);
++        bind(e, 0, .{ inj.rows.at((sp.row + lo - sp.at) * D * 2), out.at((lo - pos) * D * 2) });
++        e.setValue(@as(u32, @intCast(n * D / 2)), 2);
++        e.dispatchThreads(size(n * D / 2, 1, 1), size(256, 1, 1));
++    }
++}
++
+ /// One stream's rows in a shared window: its caches, its first row, its rows and the position of the first.
+ pub const Seg = struct { s: *st.State, row0: u32, rows: u32, pos: u32 };
+ 
+@@ -135,11 +156,12 @@ pub fn scale(x: *const Ctx, e: mtl.ComputeEncoder, in: Ref, out: Ref, rows: u32,
+     e.dispatchThreads(size(width, rows, 1), size(@min(width, 256), 1, 1));
+ }
+ 
+-/// The window's tokens (`ids`, u32) as embedding rows in all four streams.
+-pub fn embed(x: *Ctx, e: mtl.ComputeEncoder, ids: Ref, rows: u32) void {
++/// The window's tokens (`ids`, u32, at positions pos..) as embedding rows in all four streams, image rows injected.
++pub fn embed(x: *Ctx, e: mtl.ComputeEncoder, ids: Ref, rows: u32, pos: u32) void {
+     const sc = x.sc;
+     const D = x.c.hidden;
+     embedRows(x, e, ids, sc.h, rows);
++    inject(x, e, sc.h, rows, pos);
+     e.setPipeline(x.k.streams);
+     bind(e, 0, .{ sc.h, sc.x[0] });
+     e.setValue([2]u32{ D, rows }, 2);
+@@ -389,7 +411,7 @@ pub fn backbone(x: *Ctx, e: mtl.ComputeEncoder, ids: Ref, rows: u32, pos: u32) v
+     const c = x.c;
+     const sc = x.sc;
+     const k = x.skip;
+-    if (k & Class.ends == 0) embed(x, e, ids, rows);
++    if (k & Class.ends == 0) embed(x, e, ids, rows, pos);
+     const plane = @as(usize, rows) * c.hidden * 2;
+     snap(x, e, sc.h, plane);
+     var pending = false;
+diff --git a/zig/src/families/glm/glm.zig b/zig/src/families/glm/glm.zig
+index 2aad94c..74ef790 100644
+--- a/zig/src/families/glm/glm.zig
++++ b/zig/src/families/glm/glm.zig
+@@ -11,6 +11,8 @@ pub const ep = @import("ep.zig");
+ pub const slots = @import("slots.zig");
+ pub const backend = @import("backend.zig");
+ pub const mirror = @import("mirror.zig");
++pub const vision = @import("vision.zig");
++pub const image = @import("image.zig");
+ 
+ test {
+     _ = config;
+@@ -23,4 +25,6 @@ test {
+     _ = @import("../../core/copy_index.zig");
+     _ = @import("attn_check.zig");
+     _ = mirror;
++    _ = vision;
++    _ = image;
+ }
+diff --git a/zig/src/families/glm/image.zig b/zig/src/families/glm/image.zig
+new file mode 100644
+index 0000000..4da98c4
+--- /dev/null
++++ b/zig/src/families/glm/image.zig
+@@ -0,0 +1,453 @@
++//! An image's bytes to GLM5-Next vision patches as TensorFold 0.6.6's --vision makes them: decoded as its
++//! vision/images.py does with PIL (ImageIO here: the stored values, no colour management; EXIF orientation applied;
++//! alpha composited over white with PIL's integer blend), then mlx-vlm's Glm5NextImageProcessor: sized under the
++//! token budget, resized with PIL's 8-bit bicubic resampler, padded with black, normalized, and cut into 2x2 windows
++//! of 14x14 patches, each patch's frame given twice (temporal_patch_size 2).
++const std = @import("std");
++const vision = @import("vision.zig");
++
++pub const Rgb = struct {
++    w: u32,
++    h: u32,
++    px: []u8, // row-major RGB, 3 bytes a pixel
++
++    pub fn deinit(r: Rgb, gpa: std.mem.Allocator) void {
++        gpa.free(r.px);
++    }
++};
++
++/// One image ready for the tower: its patches, its patch grid and its tokens (gh * gw / 4).
++pub const Prepared = struct {
++    pixels: []f32, // [gh * gw, 1176]
++    gh: u32,
++    gw: u32,
++    tokens: u32,
++    hash: u64, // of the image's bytes: two prompts with the same placeholders but other images are other prompts
++};
++
++pub const Error = error{ BadImage, ImageTooLarge, Animated, ImageTooSmall, OutOfMemory };
++
++/// images.py's ImageLimits: an image's encoded bytes, sides and pixels.
++pub const max_bytes = 10 << 20;
++pub const max_side = 8192;
++pub const max_pixels = 16 << 20;
++
++// ---- ImageIO and CoreGraphics (C APIs; the server binary links both frameworks) ----
++const CF = *anyopaque;
++const CGRect = extern struct { x: f64, y: f64, w: f64, h: f64 };
++extern "c" fn CFDataCreate(alloc: ?CF, bytes: [*]const u8, len: isize) ?CF;
++extern "c" fn CFDataGetBytePtr(data: CF) [*]const u8;
++extern "c" fn CFDataGetLength(data: CF) isize;
++extern "c" fn CFRelease(cf: CF) void;
++extern "c" fn CGImageSourceCreateWithData(data: CF, options: ?CF) ?CF;
++extern "c" fn CGImageSourceGetCount(src: CF) usize;
++extern "c" fn CGImageSourceCreateImageAtIndex(src: CF, index: usize, options: ?CF) ?CF;
++extern "c" fn CGImageGetWidth(img: CF) usize;
++extern "c" fn CGImageGetHeight(img: CF) usize;
++extern "c" fn CGImageGetBitsPerComponent(img: CF) usize;
++extern "c" fn CGImageGetBitsPerPixel(img: CF) usize;
++extern "c" fn CGImageGetBytesPerRow(img: CF) usize;
++extern "c" fn CGImageGetBitmapInfo(img: CF) u32;
++extern "c" fn CGImageGetColorSpace(img: CF) ?CF;
++extern "c" fn CGColorSpaceGetModel(cs: CF) i32;
++extern "c" fn CGImageGetDataProvider(img: CF) ?CF;
++extern "c" fn CGDataProviderCopyData(p: CF) ?CF;
++extern "c" fn CGColorSpaceCreateDeviceRGB() ?CF;
++extern "c" fn CGColorSpaceRelease(cs: CF) void;
++extern "c" fn CGBitmapContextCreate(data: ?*anyopaque, w: usize, h: usize, bpc: usize, bpr: usize, cs: CF, info: u32) ?CF;
++extern "c" fn CGContextDrawImage(ctx: CF, rect: CGRect, img: CF) void;
++extern "c" fn CGContextRelease(ctx: CF) void;
++extern "c" fn CGContextSetRGBFillColor(ctx: CF, r: f64, g: f64, b: f64, a: f64) void;
++extern "c" fn CGContextFillRect(ctx: CF, rect: CGRect) void;
++extern "c" fn CGImageSourceCopyPropertiesAtIndex(src: CF, index: usize, options: ?CF) ?CF;
++extern "c" fn CFDictionaryGetValue(dict: CF, key: ?*const anyopaque) ?CF;
++extern "c" fn CFNumberGetValue(num: CF, kind: isize, out: *anyopaque) bool;
++extern var kCGImagePropertyOrientation: ?*const anyopaque;
++
++const alpha_mask: u32 = 0x1f;
++const order_mask: u32 = 0x7000;
++const order_32_little: u32 = 0x2000;
++const order_16_little: u32 = 0x1000;
++const float_components: u32 = 0x100;
++
++/// A PNG, JPEG, GIF, WebP, HEIC or any other single-frame image ImageIO reads, as 8-bit RGB: upright by its EXIF
++/// orientation (PIL's exif_transpose) and over white where it has alpha (images.py's paste onto a white canvas).
++pub fn decode(gpa: std.mem.Allocator, bytes: []const u8) Error!Rgb {
++    if (bytes.len == 0) return error.BadImage;
++    if (bytes.len > max_bytes) return error.ImageTooLarge;
++    const data = CFDataCreate(null, bytes.ptr, @intCast(bytes.len)) orelse return error.OutOfMemory;
++    defer CFRelease(data);
++    const src = CGImageSourceCreateWithData(data, null) orelse return error.BadImage;
++    defer CFRelease(src);
++    const frames = CGImageSourceGetCount(src);
++    if (frames == 0) return error.BadImage;
++    if (frames > 1) return error.Animated; // images.py: animated and multipage images are refused
++    const img = CGImageSourceCreateImageAtIndex(src, 0, null) orelse return error.BadImage;
++    defer CFRelease(img);
++    const w = CGImageGetWidth(img);
++    const h = CGImageGetHeight(img);
++    if (w == 0 or h == 0) return error.BadImage;
++    if (w > max_side or h > max_side or w * h > max_pixels) return error.ImageTooLarge;
++    const out = try gpa.alloc(u8, w * h * 3);
++    errdefer gpa.free(out);
++    if (!(try raw(img, w, h, out))) try drawn(img, w, h, out);
++    const rgb: Rgb = .{ .w = @intCast(w), .h = @intCast(h), .px = out };
++    const o = orientation(src);
++    if (o <= 1 or o > 8) return rgb;
++    defer rgb.deinit(gpa);
++    return orient(gpa, rgb, o);
++}
++
++/// The first image's EXIF orientation (1-8; 1 or 0: as stored).
++fn orientation(src: CF) u32 {
++    const props = CGImageSourceCopyPropertiesAtIndex(src, 0, null) orelse return 1;
++    defer CFRelease(props);
++    const num = CFDictionaryGetValue(props, kCGImagePropertyOrientation) orelse return 1;
++    var v: i32 = 1;
++    if (!CFNumberGetValue(num, 9, &v)) return 1; // kCFNumberIntType
++    return if (v < 1) 1 else @intCast(v);
++}
++
++/// PIL's exif_transpose: orientation 2-8 as FLIP_LEFT_RIGHT, ROTATE_180, FLIP_TOP_BOTTOM, TRANSPOSE, ROTATE_270,
++/// TRANSVERSE, ROTATE_90; each output pixel read from its source pixel.
++pub fn orient(gpa: std.mem.Allocator, src: Rgb, o: u32) Error!Rgb {
++    const w: usize = src.w;
++    const h: usize = src.h;
++    const swap = o >= 5;
++    const ow = if (swap) h else w;
++    const oh = if (swap) w else h;
++    const out = try gpa.alloc(u8, ow * oh * 3);
++    for (0..oh) |y| for (0..ow) |x| {
++        const s: [2]usize = switch (o) {
++            2 => .{ w - 1 - x, y },
++            3 => .{ w - 1 - x, h - 1 - y },
++            4 => .{ x, h - 1 - y },
++            5 => .{ y, x },
++            6 => .{ y, h - 1 - x },
++            7 => .{ w - 1 - y, h - 1 - x },
++            else => .{ w - 1 - y, x },
++        };
++        @memcpy(out[(y * ow + x) * 3 ..][0..3], src.px[(s[1] * w + s[0]) * 3 ..][0..3]);
++    };
++    return .{ .w = @intCast(ow), .h = @intCast(oh), .px = out };
++}
++
++/// PIL's paste of a pixel with alpha `a` onto white: DIV255(255 * (255 - a) + c * a).
++fn overWhite(c: u8, a: u8) u8 {
++    const t: u32 = 255 * (255 - @as(u32, a)) + @as(u32, c) * a + 128;
++    return @intCast(((t >> 8) + t) >> 8);
++}
++
++/// The decoder's own values for 8- and 16-bit gray and RGB layouts (what PIL reads); false for any other layout.
++fn raw(img: CF, w: usize, h: usize, out: []u8) Error!bool {
++    const info = CGImageGetBitmapInfo(img);
++    if (info & float_components != 0) return false;
++    const cs = CGImageGetColorSpace(img) orelse return false;
++    const model = CGColorSpaceGetModel(cs); // 0 monochrome, 1 RGB
++    if (model != 0 and model != 1) return false;
++    const bpc = CGImageGetBitsPerComponent(img);
++    const bpp = CGImageGetBitsPerPixel(img);
++    if (bpc != 8 and bpc != 16) return false;
++    const alpha = info & alpha_mask; // 0 none, 1/2 premultiplied last/first, 3/4 last/first, 5/6 skip last/first
++    if (alpha == 1 or alpha == 2 or alpha > 6) return false;
++    const colours: usize = if (model == 1) 3 else 1;
++    const comps: usize = colours + @intFromBool(alpha != 0);
++    if (bpp != comps * bpc) return false;
++    const first = alpha == 2 or alpha == 4 or alpha == 6; // the alpha (or skipped) component leads
++    const order = info & order_mask;
++    const little = (bpc == 8 and order == order_32_little) or (bpc == 16 and order == order_16_little);
++    if (bpc == 8 and order != 0 and order != order_32_little) return false;
++    if (bpc == 8 and little and comps != 4) return false;
++    const provider = CGImageGetDataProvider(img) orelse return false;
++    const data = CGDataProviderCopyData(provider) orelse return false;
++    defer CFRelease(data);
++    const base = CFDataGetBytePtr(data);
++    const len: usize = @intCast(CFDataGetLength(data));
++    const bpr = CGImageGetBytesPerRow(img);
++    if (bpr * (h - 1) + w * bpp / 8 > len) return false;
++    const step = bpc / 8;
++    for (0..h) |y| {
++        const row = base + y * bpr;
++        for (0..w) |x| {
++            const px = row + x * comps * step;
++            var c: [4]u8 = undefined;
++            for (0..comps) |i| {
++                // a 32-bit little-endian pixel stores its components reversed; a 16-bit one each component's bytes
++                const slot = if (bpc == 8 and little) comps - 1 - i else i;
++                const at = px + slot * step;
++                c[i] = if (step == 1) at[0] else if (little) at[1] else at[0]; // 16 bits: the high byte, as PIL's 8-bit view
++            }
++            const lead: usize = @intFromBool(first and alpha != 0);
++            const o = out[(y * w + x) * 3 ..][0..3];
++            if (colours == 3) {
++                o.* = .{ c[lead], c[lead + 1], c[lead + 2] };
++            } else {
++                o.* = .{ c[lead], c[lead], c[lead] };
++            }
++            if (alpha == 3 or alpha == 4) { // a real alpha band: over white, as images.py pastes it
++                const a = if (first) c[0] else c[comps - 1];
++                for (o) |*v| v.* = overWhite(v.*, a);
++            }
++        }
++    }
++    return true;
++}
++
++/// Any other layout (palette, CMYK, float, premultiplied): drawn into an RGB context over white.
++fn drawn(img: CF, w: usize, h: usize, out: []u8) Error!void {
++    const cs = CGColorSpaceCreateDeviceRGB() orelse return error.BadImage;
++    defer CGColorSpaceRelease(cs);
++    const tmp = std.heap.page_allocator.alloc(u8, w * h * 4) catch return error.OutOfMemory;
++    defer std.heap.page_allocator.free(tmp);
++    @memset(tmp, 0);
++    const ctx = CGBitmapContextCreate(tmp.ptr, w, h, 8, w * 4, cs, 5) orelse return error.BadImage; // RGBX
++    defer CGContextRelease(ctx);
++    CGContextSetRGBFillColor(ctx, 1, 1, 1, 1);
++    CGContextFillRect(ctx, .{ .x = 0, .y = 0, .w = @floatFromInt(w), .h = @floatFromInt(h) });
++    CGContextDrawImage(ctx, .{ .x = 0, .y = 0, .w = @floatFromInt(w), .h = @floatFromInt(h) }, img);
++    for (0..w * h) |i| @memcpy(out[i * 3 ..][0..3], tmp[i * 4 ..][0..3]);
++}
++
++// ---- the processor's geometry ----
++
++pub const Geometry = struct { target_h: u32, target_w: u32, content_h: u32, content_w: u32 };
++
++fn alignUp(v: u64, f: u64) u64 {
++    return (v + f - 1) / f * f;
++}
++
++/// smart_resize and _resize_geometry (num_frames = temporal_patch_size, as _process_one calls it): the padded canvas
++/// under `max_tokens` (at least `min_tokens`), and the content size the image is resized to inside it.
++pub fn geometry(h: u32, w: u32, min_tokens: u32, max_tokens: u32) Error!Geometry {
++    const factor: u64 = vision.patch * vision.merge;
++    const frames: u64 = vision.temporal;
++    const per_token = frames * factor * factor;
++    const min_px = @as(u64, min_tokens) * per_token;
++    const max_px = @as(u64, max_tokens) * per_token;
++    if (min_tokens == 0 or max_tokens < min_tokens) return error.ImageTooSmall;
++    const H: u64 = h;
++    const W: u64 = w;
++    var ah = alignUp(H, factor);
++    var aw = alignUp(W, factor);
++    var pixels = frames * ah * aw;
++    if (pixels < min_px) {
++        const scale = @sqrt(@as(f64, @floatFromInt(min_px)) / @as(f64, @floatFromInt(frames * H * W)));
++        ah = alignUp(@max(1, @as(u64, @intFromFloat(@ceil(@as(f64, @floatFromInt(H)) * scale)))), factor);
++        aw = alignUp(@max(1, @as(u64, @intFromFloat(@ceil(@as(f64, @floatFromInt(W)) * scale)))), factor);
++        pixels = frames * ah * aw;
++    }
++    if (pixels > max_px) { // the tallest content that fits, by bisection on its height
++        if (max_px < frames * factor * factor) return error.ImageTooSmall;
++        var best: [2]u64 = .{ factor, factor };
++        var low: i64 = 1;
++        var high: i64 = @intCast(H);
++        while (low <= high) {
++            const ch: u64 = @intCast(@divFloor(low + high, 2));
++            const cw: u64 = @max(1, W * ch / H); // math.floor(width * content_h / height)
++            const cand: [2]u64 = .{ alignUp(ch, factor), alignUp(cw, factor) };
++            if (frames * cand[0] * cand[1] <= max_px) {
++                best = cand;
++                low = @as(i64, @intCast(ch)) + 1;
++            } else high = @as(i64, @intCast(ch)) - 1;
++        }
++        ah = best[0];
++        aw = best[1];
++    }
++    var scale = @min(@as(f64, @floatFromInt(ah)) / @as(f64, @floatFromInt(H)), @as(f64, @floatFromInt(aw)) / @as(f64, @floatFromInt(W)));
++    if (frames * H * W >= min_px) scale = @min(1.0, scale);
++    const chf: u64 = @intFromFloat(@floor(@as(f64, @floatFromInt(H)) * scale));
++    const cwf: u64 = @intFromFloat(@floor(@as(f64, @floatFromInt(W)) * scale));
++    return .{ .target_h = @intCast(ah), .target_w = @intCast(aw), .content_h = @intCast(@max(1, @min(ah, chf))), .content_w = @intCast(@max(1, @min(aw, cwf))) };
++}
++
++// ---- PIL's ImagingResample for 8-bit images (Resample.c), bicubic (a = -0.5) ----
++
++const precision_bits = 32 - 8 - 2;
++
++fn bicubic(x0: f64) f64 {
++    const a = -0.5;
++    const x = @abs(x0);
++    if (x < 1.0) return ((a + 2.0) * x - (a + 3.0)) * x * x + 1;
++    if (x < 2.0) return (((x - 5) * x + 8) * x - 4) * a;
++    return 0;
++}
++
++const Coeffs = struct { bounds: []u32, kk: []i32, ksize: usize };
++
++/// precompute_coeffs and normalize_coeffs_8bpc: each output pixel's first input pixel, count and fixed-point weights.
++fn coeffs(gpa: std.mem.Allocator, in_size: u32, out_size: u32) Error!Coeffs {
++    const scale = @as(f64, @floatFromInt(in_size)) / @as(f64, @floatFromInt(out_size));
++    const filterscale = @max(scale, 1.0);
++    const support = 2.0 * filterscale;
++    const ksize: usize = @as(usize, @intFromFloat(@ceil(support))) * 2 + 1;
++    const bounds = try gpa.alloc(u32, @as(usize, out_size) * 2);
++    errdefer gpa.free(bounds);
++    const kk = try gpa.alloc(i32, @as(usize, out_size) * ksize);
++    errdefer gpa.free(kk);
++    var pre = try gpa.alloc(f64, ksize);
++    defer gpa.free(pre);
++    const ss = 1.0 / filterscale;
++    for (0..out_size) |xx| {
++        const center = (@as(f64, @floatFromInt(xx)) + 0.5) * scale;
++        var xmin_i: i64 = @intFromFloat(center - support + 0.5); // (int) truncates toward zero, as C does
++        if (xmin_i < 0) xmin_i = 0;
++        var xmax_i: i64 = @intFromFloat(center + support + 0.5);
++        if (xmax_i > in_size) xmax_i = in_size;
++        xmax_i -= xmin_i;
++        const xmin: usize = @intCast(xmin_i);
++        const xmax: usize = @intCast(xmax_i);
++        var ww: f64 = 0;
++        for (0..xmax) |x| {
++            const w = bicubic((@as(f64, @floatFromInt(x + xmin)) - center + 0.5) * ss);
++            pre[x] = w;
++            ww += w;
++        }
++        for (0..ksize) |x| {
++            const k = if (x < xmax) (if (ww != 0) pre[x] / ww else pre[x]) else 0;
++            const v = k * @as(f64, @floatFromInt(@as(i64, 1) << precision_bits));
++            kk[xx * ksize + x] = @intFromFloat(if (v < 0) v - 0.5 else v + 0.5); // C's (int) of the rounded value
++        }
++        bounds[xx * 2] = @intCast(xmin);
++        bounds[xx * 2 + 1] = @intCast(xmax);
++    }
++    return .{ .bounds = bounds, .kk = kk, .ksize = ksize };
++}
++
++fn clip8(v: i64) u8 {
++    const s = v >> precision_bits;
++    return if (s < 0) 0 else if (s > 255) 255 else @intCast(s);
++}
++
++/// Image.resize((w, h), BICUBIC) on an 8-bit RGB image: horizontal pass, then vertical, each rounded to 8 bits.
++pub fn resize(gpa: std.mem.Allocator, src: Rgb, w: u32, h: u32) Error!Rgb {
++    var cur = src;
++    var owned = false;
++    errdefer if (owned) cur.deinit(gpa);
++    if (w != src.w) { // horizontal (PIL limits it to the rows the vertical pass reads: all of them here)
++        const c = try coeffs(gpa, src.w, w);
++        defer gpa.free(c.bounds);
++        defer gpa.free(c.kk);
++        const out = try gpa.alloc(u8, @as(usize, w) * cur.h * 3);
++        for (0..cur.h) |y| for (0..w) |xx| {
++            const xmin = c.bounds[xx * 2];
++            const xmax = c.bounds[xx * 2 + 1];
++            const k = c.kk[xx * c.ksize ..];
++            for (0..3) |ch| {
++                var ss: i64 = 1 << (precision_bits - 1);
++                for (0..xmax) |x| ss += @as(i64, cur.px[(y * cur.w + x + xmin) * 3 + ch]) * k[x];
++                out[(y * w + xx) * 3 + ch] = clip8(ss);
++            }
++        };
++        if (owned) cur.deinit(gpa);
++        cur = .{ .w = w, .h = cur.h, .px = out };
++        owned = true;
++    }
++    if (h != src.h) {
++        const c = try coeffs(gpa, src.h, h);
++        defer gpa.free(c.bounds);
++        defer gpa.free(c.kk);
++        const out = try gpa.alloc(u8, @as(usize, cur.w) * h * 3);
++        for (0..h) |yy| {
++            const ymin = c.bounds[yy * 2];
++            const ymax = c.bounds[yy * 2 + 1];
++            const k = c.kk[yy * c.ksize ..];
++            for (0..cur.w) |x| for (0..3) |ch| {
++                var ss: i64 = 1 << (precision_bits - 1);
++                for (0..ymax) |y| ss += @as(i64, cur.px[((y + ymin) * cur.w + x) * 3 + ch]) * k[y];
++                out[(yy * cur.w + x) * 3 + ch] = clip8(ss);
++            };
++        }
++        if (owned) cur.deinit(gpa);
++        cur = .{ .w = cur.w, .h = h, .px = out };
++        owned = true;
++    }
++    if (!owned) cur = .{ .w = src.w, .h = src.h, .px = try gpa.dupe(u8, src.px) };
++    return cur;
++}
++
++/// The content (already resized) padded with black to the canvas, scaled by 1/255, normalized by channel, cut into
++/// 2x2 windows of 14x14 patches in row-major window order, each patch [channel, frame (twice), row, column].
++pub fn patchify(gpa: std.mem.Allocator, content: Rgb, g: Geometry, mean: [3]f32, sd: [3]f32) Error![]f32 {
++    const P = vision.patch;
++    const M = vision.merge;
++    const gh = g.target_h / P;
++    const gw = g.target_w / P;
++    const out = try gpa.alloc(f32, @as(usize, gh) * gw * vision.patch_width);
++    const rescale: f32 = @floatCast(@as(f64, 1.0) / 255.0);
++    var row: usize = 0;
++    for (0..gh / M) |wy| for (0..gw / M) |wx| for (0..M) |my| for (0..M) |mx| {
++        const py0 = (wy * M + my) * P;
++        const px0 = (wx * M + mx) * P;
++        const dst = out[row * vision.patch_width ..][0..vision.patch_width];
++        for (0..3) |ch| for (0..vision.temporal) |t| for (0..P) |dy| for (0..P) |dx| {
++            const y = py0 + dy;
++            const x = px0 + dx;
++            const v: u8 = if (y < content.h and x < content.w) content.px[(y * content.w + x) * 3 + ch] else 0;
++            const f = @as(f32, @floatFromInt(v)) * rescale;
++            dst[((ch * vision.temporal + t) * P + dy) * P + dx] = (f - mean[ch]) / sd[ch];
++        };
++        row += 1;
++    };
++    return out;
++}
++
++/// Bytes to patches: decoded, sized for `max_tokens` (at least min(16, max_tokens)), resized, padded and cut.
++pub fn prepare(gpa: std.mem.Allocator, bytes: []const u8, c: vision.Config, max_tokens: u32) Error!Prepared {
++    const img = try decode(gpa, bytes);
++    defer img.deinit(gpa);
++    return prepareRgb(gpa, img, std.hash.Wyhash.hash(0x1a6e, bytes), c, max_tokens);
++}
++
++pub fn prepareRgb(gpa: std.mem.Allocator, img: Rgb, hash: u64, c: vision.Config, max_tokens: u32) Error!Prepared {
++    const g = try geometry(img.h, img.w, @min(c.min_tokens, max_tokens), max_tokens);
++    const content = try resize(gpa, img, g.content_w, g.content_h);
++    defer content.deinit(gpa);
++    const pixels = try patchify(gpa, content, g, c.mean, c.std);
++    const gh = g.target_h / vision.patch;
++    const gw = g.target_w / vision.patch;
++    return .{ .pixels = pixels, .gh = gh, .gw = gw, .tokens = gh * gw / vision.patches_per_token, .hash = hash };
++}
++
++test "geometry follows smart_resize" {
++    // the reference dumps' grids: 517x389 pads to 532x392 unscaled; 96x96 grows to 112; 20x15 to the 16-token floor
++    try std.testing.expectEqual(Geometry{ .target_h = 392, .target_w = 532, .content_h = 389, .content_w = 517 }, try geometry(389, 517, 16, 4096));
++    try std.testing.expectEqual(Geometry{ .target_h = 112, .target_w = 112, .content_h = 112, .content_w = 112 }, try geometry(96, 96, 16, 4096));
++    const tiny = try geometry(15, 20, 16, 4096);
++    try std.testing.expectEqual(@as(u32, 8 * 14), tiny.target_h);
++    try std.testing.expectEqual(@as(u32, 10 * 14), tiny.target_w);
++    // a large image under a small budget: the canvas fits it
++    const big = try geometry(1500, 2000, 16, 256);
++    try std.testing.expect(@as(u64, big.target_h) * big.target_w * 2 <= 256 * 2 * 28 * 28);
++    try std.testing.expect(big.content_h <= big.target_h and big.content_w <= big.target_w);
++}
++
++test "orientations move pixels as PIL's transposes do" {
++    const gpa = std.testing.allocator;
++    // a 3x2 image of pixel indices: 0 1 2 / 3 4 5
++    var px: [18]u8 = undefined;
++    for (0..6) |i| @memset(px[i * 3 ..][0..3], @intCast(i));
++    const src: Rgb = .{ .w = 3, .h = 2, .px = &px };
++    const want = [_][]const u8{ &.{ 2, 1, 0, 5, 4, 3 }, &.{ 5, 4, 3, 2, 1, 0 }, &.{ 3, 4, 5, 0, 1, 2 }, &.{ 0, 3, 1, 4, 2, 5 }, &.{ 3, 0, 4, 1, 5, 2 }, &.{ 5, 2, 4, 1, 3, 0 }, &.{ 2, 5, 1, 4, 0, 3 } };
++    for (want, 2..) |w, o| {
++        const out = try orient(gpa, src, @intCast(o));
++        defer out.deinit(gpa);
++        for (w, 0..) |v, i| try std.testing.expectEqual(v, out.px[i * 3]);
++    }
++}
++
++test "alpha over white follows PIL's DIV255" {
++    try std.testing.expectEqual(@as(u8, 255), overWhite(0, 0));
++    try std.testing.expectEqual(@as(u8, 10), overWhite(10, 255));
++    try std.testing.expectEqual(@as(u8, 132), overWhite(10, 128)); // DIV255(255 * 127 + 10 * 128)
++}
++
++test "resize keeps a flat image flat and its size" {
++    const gpa = std.testing.allocator;
++    const px = try gpa.alloc(u8, 7 * 5 * 3);
++    defer gpa.free(px);
++    @memset(px, 200);
++    const out = try resize(gpa, .{ .w = 7, .h = 5, .px = px }, 13, 3);
++    defer out.deinit(gpa);
++    try std.testing.expectEqual(@as(u32, 13), out.w);
++    for (out.px) |v| try std.testing.expectEqual(@as(u8, 200), v);
++}
+diff --git a/zig/src/families/glm/mtp.zig b/zig/src/families/glm/mtp.zig
+index d683c23..109ebc9 100644
+--- a/zig/src/families/glm/mtp.zig
++++ b/zig/src/families/glm/mtp.zig
+@@ -35,6 +35,7 @@ pub fn absorb(x: *fwd.Ctx, e: mtl.ComputeEncoder, h: Ref, next: Ref, rows: u32,
+     const L = &x.w.layers[c.layers];
+     const m = x.w.mtp.?;
+     fwd.embedRows(x, e, next, sc.m_emb, rows);
++    fwd.inject(x, e, sc.m_emb, rows, pos + 1); // the head reads each row's next token: an image's rows one place on
+     fwd.rms(x, e, sc.m_emb, m.enorm, sc.m_eh, rows, D, D, 2 * D, c.eps);
+     fwd.rms(x, e, h, m.hnorm, sc.m_eh.at(@as(usize, D) * 2), rows, D, D, 2 * D, c.eps);
+     fwd.qmv(x, e, x.k.qmv_kda_out, sc.m_eh, m.eh_proj, sc.m_x, rows);
+diff --git a/zig/src/families/glm/prompt.zig b/zig/src/families/glm/prompt.zig
+index 42e9f1d..582f5f8 100644
+--- a/zig/src/families/glm/prompt.zig
++++ b/zig/src/families/glm/prompt.zig
+@@ -403,7 +403,7 @@ pub fn backbone(p: *const Prompt, x: *fwd.Ctx, e: mtl.ComputeEncoder, ids: Ref,
+     std.debug.assert(x.sc == ss and M <= max_rows);
+     const s = x.skip; // classes a profile leaves out
+     const Class = fwd.Class;
+-    if (s & Class.ends == 0) fwd.embed(x, e, ids, M);
++    if (s & Class.ends == 0) fwd.embed(x, e, ids, M, pos);
+     const plane = @as(usize, M) * c.hidden * 2; // a trace's capture points: the decode backbone's
+     fwd.snap(x, e, ss.h, plane);
+     var pending = false;
+@@ -465,6 +465,7 @@ pub fn mtp(p: *const Prompt, x: *const fwd.Ctx, e: mtl.ComputeEncoder, h: Ref, n
+     const L = &x.w.layers[c.layers];
+     const m = x.w.mtp.?;
+     fwd.embedRows(x, e, next, p.m_emb, M);
++    fwd.inject(x, e, p.m_emb, M, pos + 1); // the head reads each row's next token: an image's rows one place on
+     fwd.rms(x, e, p.m_emb, m.enorm, p.m_eh, M, D, D, 2 * D, c.eps);
+     fwd.rms(x, e, h, m.hnorm, p.m_eh.at(@as(usize, D) * 2), M, D, D, 2 * D, c.eps);
+     qmm(p, e, p.m_eh, m.eh_proj, p.m_x, M);
+diff --git a/zig/src/families/glm/slots.zig b/zig/src/families/glm/slots.zig
+index 4bd4caa..8418791 100644
+--- a/zig/src/families/glm/slots.zig
++++ b/zig/src/families/glm/slots.zig
+@@ -8,6 +8,8 @@ const prompt_mod = @import("prompt.zig");
+ const snapshot = @import("snapshot.zig");
+ const Engine = @import("engine.zig").Engine;
+ const Ref = @import("weights.zig").Ref;
++const vision_mod = @import("vision.zig");
++const Image = @import("lanes").stream.Image;
+ 
+ /// One stream's rows in a shared window: its pending token, then the drafts the slot holds, then host drafts.
+ pub const Win = struct { slot: u32, pending: u32, held: u32, tokens: []const u32 };
+@@ -41,6 +43,8 @@ pub const Slots = struct {
+     lasts: Ref, // bf16 [max_rows, hidden]: each drafting stream's last absorbed row (m_x), gathered
+     picks: Ref, // u32 [max_rows]: a draft level's picks, a stream each
+     open: ?Open = null, // keeps and drafts encode here; the next window commits them with its forward
++    inject: ?struct { slot: u32, v: fwd.Inject } = null, // an image prompt's rows while its pass runs
++    spans: std.ArrayList(fwd.Span) = .empty,
+     windows: u64 = 0,
+     log: bool = false, // GLM_WINDOWS=1: each window's streams, rows, GPU time and the GPU's idle gap before it
+     last_end: f64 = 0,
+@@ -65,6 +69,7 @@ pub const Slots = struct {
+         var it = sl.snaps.valueIterator();
+         while (it.next()) |snap| freeSnap(gpa, snap.*);
+         sl.snaps.deinit(gpa);
++        sl.spans.deinit(gpa);
+         gpa.free(sl.slots);
+     }
+ 
+@@ -231,6 +236,9 @@ pub const Slots = struct {
+         const pool = mtl.objc.Pool.push();
+         defer pool.pop();
+         var x = sl.ctx(slot);
++        if (sl.inject) |*inj| if (inj.slot == i) {
++            x.inject = &inj.v;
++        };
+         const b = e.begin();
+         const ids = e.prompt_ids.at(@as(usize, at) * 4);
+         const next = e.prompt_ids.at(@as(usize, at + 1) * 4);
+@@ -398,6 +406,35 @@ pub const Slots = struct {
+     }
+ 
+     /// The stream in slot `i` left; once every slot is free, pending work commits on this thread (its pool's owner).
++    /// Slot `i`'s images through the tower into the engine's image rows, injected over their placeholders by the
++    /// chunks that follow until `endImages`. One image a command buffer: the tower's host-written scratch is shared.
++    pub fn images(sl: *Slots, i: u32, imgs: []const Image) !void {
++        const e = sl.e;
++        const v = e.vision orelse return error.NoVision;
++        if (imgs.len > e.vision_limits.max_images) return error.TooManyImages;
++        _ = try sl.slotAt(i);
++        sl.spans.clearRetainingCapacity();
++        try sl.flush();
++        e.sync();
++        var row: u32 = 0;
++        for (imgs) |img| {
++            if (row + img.tokens > e.vision_limits.image_tokens or img.gh * img.gw != img.tokens * vision_mod.patches_per_token) return error.ImageTooLarge;
++            if (img.at + img.tokens > sl.slots[i].prompt_len) return error.ImageOutOfPrompt;
++            const pool = mtl.objc.Pool.push();
++            defer pool.pop();
++            const b = e.begin();
++            try v.encode(b.enc, img.pixels, img.gh, img.gw, e.vision_rows.at(@as(usize, row) * e.c.hidden * 2), null);
++            try e.finish(b.cb, b.enc);
++            try sl.spans.append(sl.gpa, .{ .at = img.at, .n = img.tokens, .row = row });
++            row += img.tokens;
++        }
++        sl.inject = .{ .slot = i, .v = .{ .rows = e.vision_rows, .spans = sl.spans.items } };
++    }
++
++    pub fn endImages(sl: *Slots) void {
++        sl.inject = null;
++    }
++
+     pub fn release(sl: *Slots, i: u32) void {
+         if (i >= sl.slots.len) return;
+         const slot = &sl.slots[i];
+diff --git a/zig/src/families/glm/vision.zig b/zig/src/families/glm/vision.zig
+new file mode 100644
+index 0000000..5e815ad
+--- /dev/null
++++ b/zig/src/families/glm/vision.zig
+@@ -0,0 +1,509 @@
++//! GLM-5.3-Flash's image tower on the GPU: an image's patches to the rows that replace its `<|image|>` placeholders.
++//! mlx-vlm's glm5_next/vision.py (what TensorFold 0.6.6's --vision serves) in bf16: a patch projection, 24 pre-norm
++//! blocks (2-D rotary attention over the image's own patches, a clipped SwiGLU), a final norm, the 2x2 merge as a
++//! projection of four neighbouring patches, and the merger's projection, layer norm, GELU and clipped SwiGLU.
++const std = @import("std");
++const mtl = @import("metal");
++const sources = @import("kernel_sources");
++const frags = @import("../../core/frags.zig");
++const st = @import("../../core/safetensors.zig");
++const wts = @import("weights.zig");
++const readAll = @import("weights_fix.zig").readAll;
++const Ref = wts.Ref;
++
++// The tower this file reads; `Config.parse` refuses a checkpoint whose vision_config differs.
++pub const hidden = 1024;
++pub const heads = 16;
++pub const head_dim = 64;
++pub const depth = 24;
++pub const mlp_inter = 4096;
++pub const out_hidden = 4096; // the language model's width
++pub const merger_inter = 10240;
++pub const patch = 14;
++pub const temporal = 2;
++pub const merge = 2;
++pub const patch_width = 3 * temporal * patch * patch; // 1176: a patch's values, channel by frame by row by column
++pub const patches_per_token = merge * merge;
++
++/// --vision's limits: image tokens a prompt may hold in all (the tower's scratch and rows are sized for them), and images.
++pub const Limits = struct { image_tokens: u32 = 4096, max_images: u32 = 4 };
++
++pub const Config = struct {
++    eps: f32 = 1e-5,
++    limit: f32 = 10, // swiglu_limit
++    image_token: u32,
++    image_start: u32,
++    image_end: u32,
++    mean: [3]f32,
++    std: [3]f32,
++    min_tokens: u32,
++    max_tokens: u32,
++
++    /// config.json's vision_config and image token ids, processor_config.json's image processor; null: no tower.
++    pub fn parse(arena: std.mem.Allocator, config_json: []const u8, processor_json: ?[]const u8) !?Config {
++        const doc = try std.json.parseFromSliceLeaky(std.json.Value, arena, config_json, .{});
++        const vc = doc.object.get("vision_config") orelse return null;
++        if (vc != .object) return null;
++        const want = .{ .{ "depth", depth }, .{ "hidden_size", hidden }, .{ "num_heads", heads }, .{ "intermediate_size", mlp_inter }, .{ "out_hidden_size", out_hidden }, .{ "projection_intermediate_size", merger_inter }, .{ "patch_size", patch }, .{ "temporal_patch_size", temporal }, .{ "spatial_merge_size", merge }, .{ "in_channels", 3 } };
++        inline for (want) |kv| {
++            const v = vc.object.get(kv[0]) orelse return error.VisionConfig;
++            if (v != .integer or v.integer != kv[1]) {
++                std.log.err("glm vision: vision_config.{s} is {f}; this tower reads {d}", .{ kv[0], std.json.fmt(v, .{}), kv[1] });
++                return error.VisionConfig;
++            }
++        }
++        const act = vc.object.get("hidden_act") orelse return error.VisionConfig;
++        if (act != .string or !std.mem.eql(u8, act.string, "silu")) return error.VisionConfig;
++        var c: Config = .{ .image_token = 0, .image_start = 0, .image_end = 0, .mean = .{ 0.48145466, 0.4578275, 0.40821073 }, .std = .{ 0.26862954, 0.26130258, 0.27577711 }, .min_tokens = 16, .max_tokens = 8000 };
++        if (vc.object.get("rms_norm_eps")) |v| c.eps = @floatCast(number(v) orelse return error.VisionConfig);
++        if (vc.object.get("swiglu_limit")) |v| c.limit = @floatCast(number(v) orelse return error.VisionConfig);
++        inline for (.{ .{ "image_token_id", "image_token" }, .{ "image_start_token_id", "image_start" }, .{ "image_end_token_id", "image_end" } }) |kv| {
++            const v = doc.object.get(kv[0]) orelse return error.VisionConfig;
++            if (v != .integer) return error.VisionConfig;
++            @field(c, kv[1]) = @intCast(v.integer);
++        }
++        const pj = processor_json orelse return c;
++        const pdoc = try std.json.parseFromSliceLeaky(std.json.Value, arena, pj, .{});
++        const ip = pdoc.object.get("image_processor") orelse return c;
++        if (ip != .object) return error.VisionConfig;
++        inline for (.{ .{ "patch_size", patch }, .{ "temporal_patch_size", temporal }, .{ "merge_size", merge } }) |kv| {
++            if (ip.object.get(kv[0])) |v| if (v != .integer or v.integer != kv[1]) return error.VisionConfig;
++        }
++        if (ip.object.get("patch_expand_factor")) |v| if (v != .integer or v.integer != 1) return error.VisionConfig;
++        inline for (.{ "image_mean", "image_std" }, .{ &c.mean, &c.std }) |key, dst| if (ip.object.get(key)) |v| {
++            if (v != .array or v.array.items.len != 3) return error.VisionConfig;
++            for (v.array.items, 0..) |x, i| dst[i] = @floatCast(number(x) orelse return error.VisionConfig);
++        };
++        if (ip.object.get("min_image_tokens")) |v| c.min_tokens = @intCast(v.integer);
++        if (ip.object.get("max_image_tokens")) |v| c.max_tokens = @intCast(v.integer);
++        return c;
++    }
++
++    fn number(v: std.json.Value) ?f64 {
++        return switch (v) {
++            .float => |f| f,
++            .integer => |i| @floatFromInt(i),
++            else => null,
++        };
++    }
++};
++
++const Kernels = struct {
++    lib: mtl.Library,
++    gemm: [3][2][2]mtl.Pipeline, // [bf16 nt, f32 nt, f32 nn][M % 64 == 0][N % 128 == 0]
++    bias: mtl.Pipeline,
++    add: mtl.Pipeline,
++    rms: mtl.Pipeline,
++    layer_norm: mtl.Pipeline,
++    qkv: mtl.Pipeline,
++    softmax: mtl.Pipeline,
++    heads_: mtl.Pipeline,
++    swiglu: mtl.Pipeline,
++    gelu: mtl.Pipeline,
++
++    fn load(gpa: std.mem.Allocator, device: mtl.Device) !Kernels {
++        const src = try frags.source(device, gpa, sources.glm_vision);
++        defer gpa.free(src);
++        const lib = try mtl.Library.fromSource(device, src, mtl.CompileOptions.mlx());
++        var k: Kernels = undefined;
++        k.lib = lib;
++        const kinds = [_][]const u8{ "bf16_nt", "f32_nt", "f32_nn" };
++        for (kinds, 0..) |kind, ki| for (0..2) |m| for (0..2) |n| {
++            var name: [64]u8 = undefined;
++            const full = try std.fmt.bufPrint(&name, "glmv_gemm_{s}_{d}{d}", .{ kind, m, n });
++            k.gemm[ki][m][n] = try mtl.Pipeline.init(device, lib, full, false);
++        };
++        inline for (.{ .{ "bias", "glmv_bias" }, .{ "add", "glmv_add" }, .{ "rms", "glmv_rms" }, .{ "layer_norm", "glmv_layer_norm" }, .{ "qkv", "glmv_qkv" }, .{ "softmax", "glmv_softmax" }, .{ "heads_", "glmv_heads" }, .{ "swiglu", "glmv_swiglu" }, .{ "gelu", "glmv_gelu" } }) |kv| {
++            @field(k, kv[0]) = try mtl.Pipeline.init(device, lib, kv[1], false);
++        }
++        return k;
++    }
++
++    fn deinit(k: *Kernels) void {
++        for (&k.gemm) |*a| for (a) |*b| for (b) |p| p.deinit();
++        inline for (.{ "bias", "add", "rms", "layer_norm", "qkv", "softmax", "heads_", "swiglu", "gelu" }) |f| @field(k, f).deinit();
++        k.lib.deinit();
++    }
++};
++
++const Block = struct { norm1: Ref, norm2: Ref, qkv_w: Ref, qkv_b: Ref, proj_w: Ref, proj_b: Ref, q_norm: Ref, k_norm: Ref, gate_w: Ref, gate_b: Ref, up_w: Ref, up_b: Ref, down_w: Ref, down_b: Ref };
++
++const Weights = struct {
++    buf: mtl.Buffer,
++    patch_w: Ref,
++    patch_b: Ref,
++    blocks: [depth]Block,
++    post_norm: Ref,
++    down_w: Ref, // [4096, 2, 2, 1024]: the merge's kernel with its taps outermost, as four neighbouring patch rows read it
++    down_b: Ref,
++    m_proj: Ref,
++    m_norm_w: Ref,
++    m_norm_b: Ref,
++    m_gate: Ref,
++    m_up: Ref,
++    m_down: Ref,
++};
++
++/// The tower: kernels, weights (bf16, about 0.9 GiB) and scratch for `max_tokens` image tokens a request.
++pub const Vision = struct {
++    gpa: std.mem.Allocator,
++    c: Config,
++    k: Kernels,
++    w: Weights,
++    scratch: mtl.Buffer,
++    max_patches: u32,
++    chunk: u32, // query rows an attention pass scores at once (bounds the fp32 score buffer)
++    // scratch views
++    patches: Ref, // [P, 1176] bf16
++    cos: Ref, // [P, 64] f32
++    sin: Ref,
++    x: Ref, // [P, 1024] bf16: the residual stream
++    xn: Ref, // [P, 1024]: a norm's output; the merger's first [T, 4096]
++    att: Ref, // [P, 1024]: heads side by side; the merger's second [T, 4096]
++    branch: Ref, // [P, 1024]
++    qkv: Ref, // [P, 3072]
++    q: Ref, // [16, P, 64] f32
++    k_: Ref,
++    v: Ref,
++    s: Ref, // [16, chunk, P] f32
++    o: Ref, // [16, chunk, 64] f32
++    g: Ref, // [P, 4096] bf16 (the merger's [T, 10240] fits: T * 10240 < P * 4096)
++    u: Ref,
++    act: Ref,
++    bytes: usize,
++
++    pub fn load(gpa: std.mem.Allocator, device: mtl.Device, dir: []const u8, c: Config, max_tokens: u32) !*Vision {
++        const v = try gpa.create(Vision);
++        errdefer gpa.destroy(v);
++        v.gpa = gpa;
++        v.c = c;
++        v.k = try Kernels.load(gpa, device);
++        errdefer v.k.deinit();
++        v.w = try loadWeights(gpa, device, dir);
++        errdefer v.w.buf.deinit();
++        const P: usize = @as(usize, max_tokens) * patches_per_token;
++        v.max_patches = @intCast(P);
++        // the scores take at most 256 MiB: 16 heads of `chunk` rows by P keys in fp32
++        v.chunk = @intCast(std.math.clamp((256 << 20) / (heads * P * 4) / 64 * 64, 64, 4096));
++        const parts = [_]usize{ P * patch_width * 2, P * 64 * 4, P * 64 * 4, P * hidden * 2, P * hidden * 2, P * hidden * 2, P * hidden * 2, P * 3 * hidden * 2, P * hidden * 4, P * hidden * 4, P * hidden * 4, @as(usize, heads) * v.chunk * P * 4, @as(usize, heads) * v.chunk * head_dim * 4, P * mlp_inter * 2, P * mlp_inter * 2, P * mlp_inter * 2 };
++        var total: usize = 0;
++        for (parts) |n| total += std.mem.alignForward(usize, n, 256);
++        v.scratch = try device.buffer(total, mtl.ResourceOptions.shared | mtl.ResourceOptions.untracked);
++        errdefer v.scratch.deinit();
++        var at: usize = 0;
++        const views = [_]*Ref{ &v.patches, &v.cos, &v.sin, &v.x, &v.xn, &v.att, &v.branch, &v.qkv, &v.q, &v.k_, &v.v, &v.s, &v.o, &v.g, &v.u, &v.act };
++        for (views, parts) |view, n| {
++            view.* = .{ .buf = v.scratch, .off = at };
++            at += std.mem.alignForward(usize, n, 256);
++        }
++        v.bytes = total + v.w.buf.length();
++        return v;
++    }
++
++    pub fn deinit(v: *Vision) void {
++        v.scratch.deinit();
++        v.w.buf.deinit();
++        v.k.deinit();
++        v.gpa.destroy(v);
++    }
++
++    /// Buffers to keep resident with the engine's.
++    pub fn buffers(v: *const Vision) [2]mtl.Buffer {
++        return .{ v.w.buf, v.scratch };
++    }
++
++    /// One image's patches ([gh * gw, 1176] fp32, the processor's order) into its tokens' rows `out` ([gh * gw / 4,
++    /// 4096] bf16). The host writes the scratch: the caller has no work of this tower in flight. `stop`: after the
++    /// patch projection (0) or block `stop` (1-24), the residual stream is left in `x` and nothing more runs.
++    pub fn encode(v: *Vision, enc: mtl.ComputeEncoder, pixels: []const f32, gh: u32, gw: u32, out: Ref, stop: ?u32) !void {
++        const P: u32 = gh * gw;
++        if (P == 0 or gh % merge != 0 or gw % merge != 0) return error.ImageGrid;
++        if (P > v.max_patches) return error.ImageTooLarge;
++        if (pixels.len != @as(usize, P) * patch_width) return error.ImageGrid;
++        const T: u32 = P / patches_per_token;
++        // host: the patches in bf16 (MLX's astype), and each patch's rotary angles
++        const dst: [*]u16 = @ptrCast(@alignCast(v.patches.addr()));
++        for (pixels, 0..) |p, i| dst[i] = bf16(p);
++        rotary(v, gh, gw);
++
++        v.gemmLinear(enc, v.patches, v.w.patch_w, v.x, P, hidden, patch_width);
++        v.biasAdd(enc, v.x, v.w.patch_b, P, hidden);
++        if (stop) |s| if (s == 0) return;
++        for (v.w.blocks, 0..) |b, i| {
++            v.block(enc, b, P);
++            if (stop) |s| if (s == i + 1) return;
++        }
++        v.rms(enc, v.x, v.w.post_norm, v.xn, P, hidden);
++        // the merge: four neighbouring patches' rows are one row of xn read as [T, 4096]
++        const m0 = v.xn;
++        const m1 = v.att;
++        v.gemmLinear(enc, m0, v.w.down_w, m1, T, out_hidden, patches_per_token * hidden);
++        v.biasAdd(enc, m1, v.w.down_b, T, out_hidden);
++        v.gemmLinear(enc, m1, v.w.m_proj, m0, T, out_hidden, out_hidden);
++        v.layerNorm(enc, m0, v.w.m_norm_w, v.w.m_norm_b, m1, T, out_hidden);
++        enc.setPipeline(v.k.gelu);
++        enc.setBuffer(m1.buf, m1.off, 0);
++        enc.dispatchThreads(mtl.Size.of(@as(usize, T) * out_hidden, 1, 1), mtl.Size.of(256, 1, 1));
++        v.gemmLinear(enc, m1, v.w.m_gate, v.g, T, merger_inter, out_hidden);
++        v.gemmLinear(enc, m1, v.w.m_up, v.u, T, merger_inter, out_hidden);
++        v.swiglu(enc, @as(usize, T) * merger_inter);
++        v.gemmLinear(enc, v.act, v.w.m_down, out, T, out_hidden, merger_inter);
++    }
++
++    fn block(v: *Vision, enc: mtl.ComputeEncoder, b: Block, P: u32) void {
++        v.rms(enc, v.x, b.norm1, v.xn, P, hidden);
++        v.gemmLinear(enc, v.xn, b.qkv_w, v.qkv, P, 3 * hidden, hidden);
++        v.biasAdd(enc, v.qkv, b.qkv_b, P, 3 * hidden);
++        enc.setPipeline(v.k.qkv);
++        const bufs = [_]Ref{ v.qkv, b.q_norm, b.k_norm, v.cos, v.sin, v.q, v.k_, v.v };
++        for (bufs, 0..) |r, i| enc.setBuffer(r.buf, r.off, i);
++        enc.setValue(extern struct { L: u32, eps: f32 }{ .L = P, .eps = v.c.eps }, 8);
++        enc.dispatchGroups(mtl.Size.of(@as(usize, P) * heads * 3, 1, 1), mtl.Size.of(32, 1, 1));
++        var q0: u32 = 0;
++        while (q0 < P) : (q0 += v.chunk) {
++            const lc = @min(v.chunk, P - q0);
++            // scores of this chunk's queries against every key, each head a batch
++            v.gemm(enc, 1, v.q.at(@as(usize, q0) * head_dim * 4), v.k_, v.s, lc, P, head_dim, head_dim, head_dim, P, heads, @as(usize, P) * head_dim, @as(usize, P) * head_dim, @as(usize, lc) * P);
++            enc.setPipeline(v.k.softmax);
++            enc.setBuffer(v.s.buf, v.s.off, 0);
++            enc.setValue(P, 1);
++            enc.setValue(@as(f32, 0.125), 2); // head_dim ** -0.5
++            enc.dispatchGroups(mtl.Size.of(@as(usize, heads) * lc, 1, 1), mtl.Size.of(256, 1, 1));
++            v.gemm(enc, 2, v.s, v.v, v.o, lc, head_dim, P, P, head_dim, head_dim, heads, @as(usize, lc) * P, @as(usize, P) * head_dim, @as(usize, lc) * head_dim);
++            enc.setPipeline(v.k.heads_);
++            enc.setBuffer(v.o.buf, v.o.off, 0);
++            enc.setBuffer(v.att.buf, v.att.off, 1);
++            enc.setValue([2]u32{ lc, q0 }, 2);
++            enc.dispatchThreads(mtl.Size.of(hidden, lc, 1), mtl.Size.of(256, 1, 1));
++        }
++        v.gemmLinear(enc, v.att, b.proj_w, v.branch, P, hidden, hidden);
++        v.biasAdd(enc, v.branch, b.proj_b, P, hidden);
++        v.add(enc, v.x, v.branch, @as(usize, P) * hidden);
++        v.rms(enc, v.x, b.norm2, v.xn, P, hidden);
++        v.gemmLinear(enc, v.xn, b.gate_w, v.g, P, mlp_inter, hidden);
++        v.biasAdd(enc, v.g, b.gate_b, P, mlp_inter);
++        v.gemmLinear(enc, v.xn, b.up_w, v.u, P, mlp_inter, hidden);
++        v.biasAdd(enc, v.u, b.up_b, P, mlp_inter);
++        v.swiglu(enc, @as(usize, P) * mlp_inter);
++        v.gemmLinear(enc, v.act, b.down_w, v.branch, P, hidden, mlp_inter);
++        v.biasAdd(enc, v.branch, b.down_b, P, hidden);
++        v.add(enc, v.x, v.branch, @as(usize, P) * hidden);
++    }
++
++    /// y [M, N] = x [M, K] w^T in bf16 (w as stored, [N, K]).
++    fn gemmLinear(v: *Vision, enc: mtl.ComputeEncoder, x: Ref, w: Ref, y: Ref, M: u32, N: u32, K: u32) void {
++        v.gemm(enc, 0, x, w, y, M, N, K, K, K, N, 1, 0, 0, 0);
++    }
++
++    /// tfp::gemm_nax: d [batch, M, N] = a x b (kind 0: bf16 a b^T, 1: fp32 a b^T, 2: fp32 a b), batches `s*` elements apart.
++    fn gemm(v: *Vision, enc: mtl.ComputeEncoder, kind: usize, a: Ref, b: Ref, d: Ref, M: u32, N: u32, K: u32, lda: u32, ldb: u32, ldd: u32, batch: u32, sa: usize, sb: usize, sd: usize) void {
++        const tn = (N + 127) / 128;
++        const tm = (M + 63) / 64;
++        enc.setPipeline(v.k.gemm[kind][@intFromBool(M % 64 == 0)][@intFromBool(N % 128 == 0)]);
++        enc.setBuffer(a.buf, a.off, 0);
++        enc.setBuffer(b.buf, b.off, 1);
++        var p: [16]i32 = @splat(0);
++        const vals = [_]usize{ M, N, K, lda, ldb, ldd, tn, tm, 2, K / 256, sa, sb, sd, 0, 0 };
++        for (vals, 0..) |x, i| p[i] = @intCast(x);
++        enc.setBytes(std.mem.asBytes(&p), 2);
++        enc.setBuffer(d.buf, d.off, 3);
++        enc.dispatchThreads(mtl.Size.of(@as(usize, tn << 2) * 32, (tm + 3) / 4 * 4, @as(usize, batch) * 2), mtl.Size.of(32, 4, 2));
++    }
++
++    fn biasAdd(v: *Vision, enc: mtl.ComputeEncoder, y: Ref, b: Ref, rows: u32, width: u32) void {
++        enc.setPipeline(v.k.bias);
++        enc.setBuffer(y.buf, y.off, 0);
++        enc.setBuffer(b.buf, b.off, 1);
++        enc.setValue(width, 2);
++        enc.dispatchThreads(mtl.Size.of(width, rows, 1), mtl.Size.of(256, 1, 1));
++    }
++
++    fn add(v: *Vision, enc: mtl.ComputeEncoder, x: Ref, y: Ref, n: usize) void {
++        enc.setPipeline(v.k.add);
++        enc.setBuffer(x.buf, x.off, 0);
++        enc.setBuffer(y.buf, y.off, 1);
++        enc.dispatchThreads(mtl.Size.of(n, 1, 1), mtl.Size.of(256, 1, 1));
++    }
++
++    fn rms(v: *Vision, enc: mtl.ComputeEncoder, x: Ref, w: Ref, y: Ref, rows: u32, width: u32) void {
++        enc.setPipeline(v.k.rms);
++        enc.setBuffer(x.buf, x.off, 0);
++        enc.setBuffer(w.buf, w.off, 1);
++        enc.setBuffer(y.buf, y.off, 2);
++        enc.setValue(extern struct { rows: u32, width: u32, eps: f32 }{ .rows = rows, .width = width, .eps = v.c.eps }, 3);
++        enc.dispatchGroups(mtl.Size.of(rows, 1, 1), mtl.Size.of(256, 1, 1));
++    }
++
++    fn layerNorm(v: *Vision, enc: mtl.ComputeEncoder, x: Ref, w: Ref, b: Ref, y: Ref, rows: u32, width: u32) void {
++        enc.setPipeline(v.k.layer_norm);
++        const bufs = [_]Ref{ x, w, b, y };
++        for (bufs, 0..) |r, i| enc.setBuffer(r.buf, r.off, i);
++        enc.setValue(extern struct { rows: u32, width: u32, eps: f32 }{ .rows = rows, .width = width, .eps = 1e-5 }, 4);
++        enc.dispatchGroups(mtl.Size.of(rows, 1, 1), mtl.Size.of(256, 1, 1));
++    }
++
++    fn swiglu(v: *Vision, enc: mtl.ComputeEncoder, n: usize) void {
++        enc.setPipeline(v.k.swiglu);
++        enc.setBuffer(v.g.buf, v.g.off, 0);
++        enc.setBuffer(v.u.buf, v.u.off, 1);
++        enc.setBuffer(v.act.buf, v.act.off, 2);
++        enc.setValue(v.c.limit, 3);
++        enc.dispatchThreads(mtl.Size.of(n, 1, 1), mtl.Size.of(256, 1, 1));
++    }
++};
++
++/// fp32 to bf16, round to nearest even (MLX's astype).
++pub fn bf16(x: f32) u16 {
++    const b: u32 = @bitCast(x);
++    if (b & 0x7fffffff > 0x7f800000) return @truncate((b >> 16) | 0x40); // NaN stays NaN
++    return @truncate((b + 0x7fff + ((b >> 16) & 1)) >> 16);
++}
++
++/// Each patch's 2-D rotary angles as vision.py builds them: the patch's row then column in the image's patch grid
++/// (patches come in 2x2 merge windows, row-major windows), times the 16 frequencies 10000^(-k/16), cos and sin of
++/// [h * f, w * f] twice over a head's 64 values.
++fn rotary(v: *Vision, gh: u32, gw: u32) void {
++    var inv: [16]f32 = undefined;
++    for (&inv, 0..) |*f, k| f.* = 1.0 / @as(f32, @floatCast(std.math.pow(f64, 10000.0, @as(f64, @floatFromInt(2 * k)) / 32.0)));
++    const cs: [*]f32 = @ptrCast(@alignCast(v.cos.addr()));
++    const sn: [*]f32 = @ptrCast(@alignCast(v.sin.addr()));
++    const wx_n = gw / merge;
++    var i: usize = 0;
++    var wy: u32 = 0;
++    while (wy < gh / merge) : (wy += 1) {
++        var wx: u32 = 0;
++        while (wx < wx_n) : (wx += 1) {
++            for (0..merge) |my| for (0..merge) |mx| {
++                const h: f32 = @floatFromInt(wy * merge + my);
++                const w: f32 = @floatFromInt(wx * merge + mx);
++                for (0..32) |j| {
++                    const angle: f32 = if (j < 16) h * inv[j] else w * inv[j - 16];
++                    const c: f32 = @floatCast(@cos(@as(f64, angle)));
++                    const s: f32 = @floatCast(@sin(@as(f64, angle)));
++                    cs[i * 64 + j] = c;
++                    cs[i * 64 + j + 32] = c;
++                    sn[i * 64 + j] = s;
++                    sn[i * 64 + j + 32] = s;
++                }
++                i += 1;
++            };
++        }
++    }
++}
++
++/// model.visual.* from the checkpoint's shards into one buffer, the merge kernel's taps moved outermost.
++fn loadWeights(gpa: std.mem.Allocator, device: mtl.Device, dir: []const u8) !Weights {
++    var arena_state = std.heap.ArenaAllocator.init(gpa);
++    defer arena_state.deinit();
++    const arena = arena_state.allocator();
++    const Src = struct { path: [:0]const u8, off: u64, len: u64, dtype: st.DType, shape: []const usize };
++    var names: std.StringHashMapUnmanaged(Src) = .empty;
++    {
++        const path = try std.fmt.allocPrintSentinel(arena, "{s}/model.safetensors.index.json", .{dir}, 0);
++        const f = try mtl.MappedFile.open(path);
++        defer f.deinit();
++        const doc = try std.json.parseFromSliceLeaky(std.json.Value, arena, f.bytes[0..f.size], .{ .allocate = .alloc_always });
++        var files: std.StringArrayHashMapUnmanaged(void) = .empty;
++        var it = doc.object.get("weight_map").?.object.iterator();
++        while (it.next()) |kv| if (std.mem.startsWith(u8, kv.key_ptr.*, "model.visual.")) try files.put(arena, kv.value_ptr.string, {});
++        if (files.count() == 0) return error.NoVisionTower;
++        for (files.keys()) |name| {
++            const full = try std.fmt.allocPrintSentinel(arena, "{s}/{s}", .{ dir, name }, 0);
++            const fd = std.c.open(full, .{ .ACCMODE = .RDONLY });
++            if (fd < 0) return error.OpenFailed;
++            defer _ = std.c.close(fd);
++            var head: [8]u8 = undefined;
++            try readAll(fd, &head, 0);
++            const hlen = std.mem.readInt(u64, &head, .little);
++            const header = try arena.alloc(u8, hlen);
++            try readAll(fd, header, 8);
++            const end: u64 = @intCast(std.c.lseek(fd, 0, std.c.SEEK.END));
++            // read here, not by core/safetensors.zig: the patch kernel is 5-D, past its max_rank
++            const doc2 = try std.json.parseFromSliceLeaky(std.json.Value, arena, header, .{});
++            var eit = doc2.object.iterator();
++            while (eit.next()) |kv| {
++                if (!std.mem.startsWith(u8, kv.key_ptr.*, "model.visual.")) continue;
++                const o = kv.value_ptr.object;
++                const dtype = st.DType.parse(o.get("dtype").?.string) orelse return error.UnsupportedDType;
++                const dims = o.get("shape").?.array.items;
++                const shape = try arena.alloc(usize, dims.len);
++                var n: u64 = dtype.size();
++                for (dims, shape) |d, *s| {
++                    s.* = @intCast(d.integer);
++                    n *= s.*;
++                }
++                const offs = o.get("data_offsets").?.array.items;
++                const b: u64 = @intCast(offs[0].integer);
++                const e: u64 = @intCast(offs[1].integer);
++                if (e < b or e - b != n or 8 + hlen + e > end) return error.BadSafetensors;
++                try names.put(arena, kv.key_ptr.*, .{ .path = full, .off = 8 + hlen + b, .len = e - b, .dtype = dtype, .shape = shape });
++            }
++        }
++    }
++    // every tensor's place in one buffer, 256-aligned
++    const Want = struct { name: []const u8, shape: []const usize, ref: *Ref };
++    var w: Weights = undefined;
++    var wants: std.ArrayList(Want) = .empty;
++    try wants.append(arena, .{ .name = "patch_embed.proj.weight", .shape = &.{ hidden, 3, temporal, patch, patch }, .ref = &w.patch_w });
++    try wants.append(arena, .{ .name = "patch_embed.proj.bias", .shape = &.{hidden}, .ref = &w.patch_b });
++    for (&w.blocks, 0..) |*b, i| {
++        const fields = .{ .{ "norm1.weight", &b.norm1, &[_]usize{hidden} }, .{ "norm2.weight", &b.norm2, &[_]usize{hidden} }, .{ "attn.qkv.weight", &b.qkv_w, &[_]usize{ 3 * hidden, hidden } }, .{ "attn.qkv.bias", &b.qkv_b, &[_]usize{3 * hidden} }, .{ "attn.proj.weight", &b.proj_w, &[_]usize{ hidden, hidden } }, .{ "attn.proj.bias", &b.proj_b, &[_]usize{hidden} }, .{ "attn.q_norm.weight", &b.q_norm, &[_]usize{head_dim} }, .{ "attn.k_norm.weight", &b.k_norm, &[_]usize{head_dim} }, .{ "mlp.gate_proj.weight", &b.gate_w, &[_]usize{ mlp_inter, hidden } }, .{ "mlp.gate_proj.bias", &b.gate_b, &[_]usize{mlp_inter} }, .{ "mlp.up_proj.weight", &b.up_w, &[_]usize{ mlp_inter, hidden } }, .{ "mlp.up_proj.bias", &b.up_b, &[_]usize{mlp_inter} }, .{ "mlp.down_proj.weight", &b.down_w, &[_]usize{ hidden, mlp_inter } }, .{ "mlp.down_proj.bias", &b.down_b, &[_]usize{hidden} } };
++        inline for (fields) |f| try wants.append(arena, .{ .name = try std.fmt.allocPrint(arena, "blocks.{d}.{s}", .{ i, f[0] }), .shape = f[2], .ref = f[1] });
++    }
++    try wants.append(arena, .{ .name = "post_layernorm.weight", .shape = &.{hidden}, .ref = &w.post_norm });
++    try wants.append(arena, .{ .name = "downsample.weight", .shape = &.{ out_hidden, hidden, merge, merge }, .ref = &w.down_w });
++    try wants.append(arena, .{ .name = "downsample.bias", .shape = &.{out_hidden}, .ref = &w.down_b });
++    try wants.append(arena, .{ .name = "merger.proj.weight", .shape = &.{ out_hidden, out_hidden }, .ref = &w.m_proj });
++    try wants.append(arena, .{ .name = "merger.post_projection_norm.weight", .shape = &.{out_hidden}, .ref = &w.m_norm_w });
++    try wants.append(arena, .{ .name = "merger.post_projection_norm.bias", .shape = &.{out_hidden}, .ref = &w.m_norm_b });
++    try wants.append(arena, .{ .name = "merger.gate_proj.weight", .shape = &.{ merger_inter, out_hidden }, .ref = &w.m_gate });
++    try wants.append(arena, .{ .name = "merger.up_proj.weight", .shape = &.{ merger_inter, out_hidden }, .ref = &w.m_up });
++    try wants.append(arena, .{ .name = "merger.down_proj.weight", .shape = &.{ out_hidden, merger_inter }, .ref = &w.m_down });
++    const srcs = try arena.alloc(Src, wants.items.len);
++    var total: usize = 0;
++    for (wants.items, srcs) |want, *s| {
++        const full = try std.fmt.allocPrint(arena, "model.visual.{s}", .{want.name});
++        s.* = names.get(full) orelse {
++            std.log.err("glm vision: the checkpoint has no tensor {s}", .{full});
++            return error.MissingTensor;
++        };
++        if (s.dtype != .bf16 or !std.mem.eql(usize, s.shape, want.shape)) {
++            std.log.err("glm vision: {s} is {t} {any}; the tower reads bf16 {any}", .{ full, s.dtype, s.shape, want.shape });
++            return error.UnexpectedTensor;
++        }
++        total = std.mem.alignForward(usize, total, 256) + s.len;
++    }
++    w.buf = try device.buffer(total, mtl.ResourceOptions.shared | mtl.ResourceOptions.untracked);
++    errdefer w.buf.deinit();
++    var at: usize = 0;
++    for (wants.items, srcs) |want, s| {
++        at = std.mem.alignForward(usize, at, 256);
++        want.ref.* = .{ .buf = w.buf, .off = at };
++        const fd = std.c.open(s.path, .{ .ACCMODE = .RDONLY });
++        if (fd < 0) return error.OpenFailed;
++        defer _ = std.c.close(fd);
++        _ = std.c.fcntl(fd, 48, @as(c_int, 1)); // F_NOCACHE, as the language model's shards
++        const dst = w.buf.contents()[at..][0..s.len];
++        try readAll(fd, dst, s.off);
++        at += s.len;
++    }
++    // downsample [O, C, 2, 2] -> [O, 2, 2, C]: a merge window's four patch rows, tap by tap
++    const dw: [*]u16 = @ptrCast(@alignCast(w.down_w.addr()));
++    const tmp = try gpa.alloc(u16, hidden * merge * merge);
++    defer gpa.free(tmp);
++    for (0..out_hidden) |o| {
++        const row = dw[o * hidden * 4 ..][0 .. hidden * 4];
++        @memcpy(tmp, row);
++        for (0..hidden) |ch| for (0..4) |tap| {
++            row[tap * hidden + ch] = tmp[ch * 4 + tap];
++        };
++    }
++    return w;
++}
++
++test "bf16 rounds to nearest even" {
++    try std.testing.expectEqual(@as(u16, 0x3f80), bf16(1.0));
++    try std.testing.expectEqual(@as(u16, 0x3f80), bf16(@bitCast(@as(u32, 0x3f808000)))); // a tie to even (down)
++    try std.testing.expectEqual(@as(u16, 0x3f82), bf16(@bitCast(@as(u32, 0x3f818000)))); // a tie to even (up)
++    try std.testing.expectEqual(@as(u16, 0x3f81), bf16(@bitCast(@as(u32, 0x3f808001))));
++}
+diff --git a/zig/src/families/glm/weights.zig b/zig/src/families/glm/weights.zig
+index 4b6e0e7..6758d72 100644
+--- a/zig/src/families/glm/weights.zig
++++ b/zig/src/families/glm/weights.zig
+@@ -497,8 +497,22 @@ fn runCopies(l: *Loader, threads: usize) !void {
+     if (tx.failed.load(.acquire)) return error.TransformFailed;
+ }
+ 
++extern "c" fn mlock(addr: *const anyopaque, len: usize) c_int;
++
++/// A buffer's pages wired: faulted in now and never compressed, paged out or reclaimed while the buffer lives.
++/// Past ~110 GB of fresh buffers on a 256 GB Mac the GPU driver's wired collector otherwise hands the ones no
++/// command has touched to the compressor (145 GiB seen, past its room: jetsam then kills the system's daemons).
++pub fn wireBuffer(b: mtl.Buffer) !void {
++    if (mlock(b.contents(), b.length()) != 0) {
++        std.log.err("glm: wiring a {d} MiB buffer failed (errno {d}); vm.user_wire_limit or free memory is short", .{ b.length() >> 20, std.c._errno().* });
++        return error.WireFailed;
++    }
++}
++
+ /// The first `c.run` layers, the MTP layer (when stored) and the head; `dry`: check names, dtypes and shapes, read nothing.
+-pub fn load(gpa: std.mem.Allocator, device: mtl.Device, dir: []const u8, c: *const cfg.Config, threads: usize, dry: bool) !*Weights {
++/// `resident`: a set the buffers join, requested resident before any read (see the engine's GLM_RESIDENCY);
++/// `wire`: each buffer's pages wired (mlock) before any read, so the VM can never compress or page them (GLM_WIRE).
++pub fn load(gpa: std.mem.Allocator, device: mtl.Device, dir: []const u8, c: *const cfg.Config, threads: usize, dry: bool, resident: ?mtl.ResidencySet, wire: bool) !*Weights {
+     var arena_state = std.heap.ArenaAllocator.init(gpa);
+     defer arena_state.deinit();
+     const w = try gpa.create(Weights);
+@@ -526,6 +540,12 @@ pub fn load(gpa: std.mem.Allocator, device: mtl.Device, dir: []const u8, c: *con
+         std.debug.print("glm plan: {d} of {d} layers{s}, {d:.2} GB in buffers, every tensor's name, dtype and shape checked\n", .{ c.run, c.layers, if (has_mtp) " and the MTP layer" else "", @as(f64, @floatFromInt(w.bytes)) / 1e9 });
+         return w;
+     }
++    if (wire) for (w.buffers.items) |b| try wireBuffer(b);
++    if (resident) |set| { // resident before the reads: buffers no command has used yet are what the driver's collector reclaims
++        for (w.buffers.items) |b| set.add(b);
++        set.commit();
++        set.requestResidency();
++    }
+     try runCopies(&l, threads);
+     return w;
+ }
+diff --git a/zig/src/native/glm_host.zig b/zig/src/native/glm_host.zig
+index ba0a6e5..e52e784 100644
+--- a/zig/src/native/glm_host.zig
++++ b/zig/src/native/glm_host.zig
+@@ -76,8 +76,9 @@ fn learnedStates(gpa: Allocator, eng: *const ge.Engine, sl: *glm.slots.Slots, ro
+ }
+ 
+ /// A GLM-5.3-Flash checkpoint served: `window` tokens of cache a stream, warmed first (the pair: `speed_up`).
+-pub fn open(gpa: Allocator, io: std.Io, dir: []const u8, window: u32, speed_up: ?[]const u8, streams: u32, fixed: bool, cache_gib: ?f64, learn: ?[]const u8, learn_cap: u64) !*Host {
+-    const eng = try ge.Engine.loadWith(gpa, dir, window + 64, speed_up, learn != null);
++pub fn open(gpa: Allocator, io: std.Io, dir: []const u8, window: u32, speed_up: ?[]const u8, streams: u32, fixed: bool, cache_gib: ?f64, learn: ?[]const u8, learn_cap: u64, vision: ?api.VisionOpen) !*Host {
++    const limits: ?glm.vision.Limits = if (vision) |v| .{ .image_tokens = v.image_tokens, .max_images = v.max_images } else null;
++    const eng = try ge.Engine.loadWith(gpa, dir, window + 64, speed_up, learn != null, limits);
+     errdefer eng.deinit();
+     var toks: [96]u32 = undefined;
+     for (&toks, 0..) |*t, i| t.* = @intCast(1000 + i);
+@@ -99,7 +100,7 @@ pub fn open(gpa: Allocator, io: std.Io, dir: []const u8, window: u32, speed_up:
+     h.wall = .{ .io = io };
+     h.core = lanes.Engine.init(gpa, &h.cfg, h.back.backend(), h.wall.clock());
+     errdefer h.core.deinit();
+-    h.host = api.LaneHost.init(gpa, io, &h.core, .{ .name = "glm-zig", .lanes = n, .context_window = window, .prefill_step = eng.chunk_rows });
++    h.host = api.LaneHost.init(gpa, io, &h.core, .{ .name = "glm-zig", .lanes = n, .context_window = window, .prefill_step = eng.chunk_rows, .greedy_only = true, .vision = if (eng.vision) |v| .{ .ctx = h, .prepare = prepareImage, .image_token = v.c.image_token, .image_tokens = eng.vision_limits.image_tokens, .max_images = eng.vision_limits.max_images } else null });
+     h.cache = null;
+     const budget = cacheBudget(eng, cache_gib);
+     if (!eng.followsPeer() and budget > 0) {
+@@ -125,6 +126,13 @@ pub fn open(gpa: Allocator, io: std.Io, dir: []const u8, window: u32, speed_up:
+     return h;
+ }
+ 
++/// Info.vision's prepare: an image's bytes to the tower's patches (families/glm/image.zig), on the HTTP thread.
++fn prepareImage(ctx: *anyopaque, a: Allocator, bytes: []const u8, max_tokens: u32) anyerror!api.PreparedImage {
++    const h: *Host = @ptrCast(@alignCast(ctx));
++    const p = try glm.image.prepare(a, bytes, h.eng.vision.?.c, max_tokens);
++    return .{ .pixels = p.pixels, .gh = p.gh, .gw = p.gw, .tokens = p.tokens, .hash = p.hash };
++}
++
+ fn follow(h: *Host) void {
+     glm.mirror.follow(h.eng, &h.slots) catch |err| std.log.err("speed-up mode: following rank 0 ended: {s}", .{@errorName(err)});
+ }
+diff --git a/zig/src/native/metal.zig b/zig/src/native/metal.zig
+index 9130af8..95198c8 100644
+--- a/zig/src/native/metal.zig
++++ b/zig/src/native/metal.zig
+@@ -101,6 +101,10 @@ pub fn open(a: Allocator, gpa: Allocator, io: std.Io, o: api.Open, problem: *[]c
+     if (dense) return openQwen27(a, gpa, io, o, problem);
+     if (std.mem.eql(u8, o.model_type, "qwen4_exp")) return openFlashNext(a, gpa, io, o, problem);
+     if (std.mem.eql(u8, o.model_type, "glm5_next")) return openGlm(a, gpa, io, o, problem);
++    if (o.vision != null) {
++        problem.* = try std.fmt.allocPrint(a, "--vision: the native engine reads images for GLM-5.3-Flash only, not {s} checkpoints", .{o.model_type});
++        return null;
++    }
+     if (std.mem.eql(u8, o.model_type, "qwen3_5")) return @import("qwen35.zig").open(a, gpa, io, o, problem);
+     if (!std.mem.eql(u8, o.model_type, "nemotron_h")) {
+         problem.* = try std.fmt.allocPrint(a, "the native engine has no backend for {s} checkpoints yet; serve with --engine python", .{o.model_type});
+@@ -242,7 +246,11 @@ fn openGlm(a: Allocator, gpa: Allocator, io: std.Io, o: api.Open, problem: *[]co
+     }
+     const pool = mtl.objc.Pool.push();
+     defer pool.pop();
+-    const h = glm.open(gpa, io, o.dir, @intCast(window), o.speed_up, o.lanes, o.lanes_fixed, o.prompt_cache_gib, o.learn, @intFromFloat(o.learn_gib * (1 << 30))) catch |e| {
++    if (o.vision != null and o.speed_up != null) {
++        problem.* = try std.fmt.allocPrint(a, "--vision is served on one Mac; the --speed-up pair reads text only", .{});
++        return null;
++    }
++    const h = glm.open(gpa, io, o.dir, @intCast(window), o.speed_up, o.lanes, o.lanes_fixed, o.prompt_cache_gib, o.learn, @intFromFloat(o.learn_gib * (1 << 30)), o.vision) catch |e| {
+         problem.* = try std.fmt.allocPrint(a, "the native GLM-5.3-Flash engine cannot load {s} ({s})", .{ o.dir, @errorName(e) });
+         return null;
+     };
+diff --git a/zig/src/server/anthropic.zig b/zig/src/server/anthropic.zig
+index 4821e0f..41f7adb 100644
+--- a/zig/src/server/anthropic.zig
++++ b/zig/src/server/anthropic.zig
+@@ -51,7 +51,7 @@ fn countTokens(srv: *Server, cx: *Cx, chat: Value) errors.Refused!usize {
+     const thinking = try fields.thinkingFields(cx, chat, srv.effort_levels);
+     const on = thinking.enable orelse srv.config.enable_thinking;
+     const tools = try tool_specs.active(cx, chat.get("tools"), chat.get("tool_choice"));
+-    const msgs = try messages_mod.normalize(cx, chat.get("messages"), "system", srv.needs_user_after_tool);
++    const msgs = try messages_mod.normalizeWith(cx, chat.get("messages"), "system", srv.needs_user_after_tool, srv.info.vision != null);
+     const ids_ = prompt.renderIds(srv, cx, msgs, tools, on, srv.effortFor(thinking.effort), true) catch |e| switch (e) {
+         error.Refused => return cx.other(cx.message),
+         else => |x| return x,
+diff --git a/zig/src/server/chat.zig b/zig/src/server/chat.zig
+index 58a91d0..4592d77 100644
+--- a/zig/src/server/chat.zig
++++ b/zig/src/server/chat.zig
+@@ -8,6 +8,7 @@ const reply_text = @import("reply_text.zig");
+ const tool_stream = @import("tool_stream.zig");
+ const tool_parse = @import("tool_parse.zig");
+ const prompt_mod = @import("prompt.zig");
++const images_mod = @import("images.zig");
+ const log = @import("log.zig");
+ const ids = @import("ids.zig");
+ const clock = @import("clock.zig");
+@@ -153,7 +154,15 @@ pub fn prepare(srv: *Server, cx: *Cx, input: Input, gone: anytype) Failure!Prepa
+     var thinking = flag(f, "enable_thinking") orelse srv.config.enable_thinking;
+     if (input.prompt != null) thinking = false;
+     const effort = srv.effortFor(if (f.get("reasoning_effort")) |e| (if (e == .string) e.string else null) else null);
+-    const rendered = try prompt_mod.prepare(srv, cx, input, thinking, effort);
++    var rendered = try prompt_mod.prepare(srv, cx, input, thinking, effort);
++    // --vision: each image's placeholder expanded to its tokens before the window, chunks and cache see the prompt
++    var images: []const api.Image = &.{};
++    var cache_key: []const u32 = &.{};
++    if (input.prompt == null) if (try images_mod.expand(srv.info.vision, cx, input.messages, rendered.ids, rendered.history_len)) |x| {
++        rendered = .{ .ids = x.ids, .history_len = x.history_len };
++        images = x.images;
++        cache_key = x.cache_key;
++    };
+     if (gone.check()) return error.Cancelled;
+     if (rendered.ids.len == 0) return cx.refuse("rendered prompt is empty");
+     const window: i64 = srv.info.context_window;
+@@ -185,6 +194,8 @@ pub fn prepare(srv: *Server, cx: *Cx, input: Input, gone: anytype) Failure!Prepa
+         .chunks = try chunk_plan.withCut(a, try srv.chunks.starts(a, rendered.ids), if (srv.chunks.step > 0) @intCast(@max(system_len, 1) - 1) else 0, rendered.ids.len, srv.chunks.min_chunk),
+         .decode_spans = try prompt_mod.replySpans(srv, cx, rendered.ids), // from the tokens alone, for every request: cached states are keyed by tokens
+         .tools_json = if (input.tools.len > 0) try json.stringify(a, .{ .array = @constCast(input.tools) }, .{ .ascii = false }) else "",
++        .images = images,
++        .cache_key = cache_key,
+     };
+     try srv.checkFeatures(cx, f, input.tools.len > 0, thinking, rendered.ids, input.tools, &request);
+     if (thinking) {
+diff --git a/zig/src/server/cli.zig b/zig/src/server/cli.zig
+index 9ddee80..c87d316 100644
+--- a/zig/src/server/cli.zig
++++ b/zig/src/server/cli.zig
+@@ -36,11 +36,11 @@ pub const flags = [_]Flag{
+     .{ .name = "--api-key-file", .native = true },
+     .{ .name = "--metrics-open", .kind = .store_true, .native = true },
+     .{ .name = "--dashboard", .kind = .store_true, .native = true },
+-    .{ .name = "--vision", .kind = .store_true },
++    .{ .name = "--vision", .kind = .store_true, .native = true },
+     .{ .name = "--vision-urls", .kind = .store_true },
+     .{ .name = "--vision-offload", .kind = .store_true },
+-    .{ .name = "--vision-max-images" },
+-    .{ .name = "--vision-image-tokens" },
++    .{ .name = "--vision-max-images", .native = true },
++    .{ .name = "--vision-image-tokens", .native = true },
+     .{ .name = "--context", .native = true },
+     .{ .name = "--speed-up", .native = true },
+     .{ .name = "--max-tokens", .native = true },
+@@ -141,6 +141,9 @@ pub const Args = struct {
+     backend: []const u8 = "auto",
+     device: ?u32 = null,
+     segments: ?u32 = null,
++    vision: bool = false, // image input (GLM-5.3-Flash): data-URL image_url parts in user messages
++    vision_max_images: u32 = 4,
++    vision_image_tokens: u32 = 4096,
+ };
+ 
+ /// A usage error's message (argparse's ``error:`` line); the caller exits 2.
+@@ -239,7 +242,15 @@ fn apply(a: Allocator, out: *Args, name: []const u8, value: ?[]const u8, u: *Usa
+         const n = try int(u, a, name, v);
+         if (n < 0) return fail(u, a, "argument --compact-keep: expected a token count from 0: '{s}'", .{v});
+         out.compact_keep = @intCast(n);
+-    } else if (is(name, "--compact-memory")) out.compact_memory = v else if (is(name, "--slide")) out.slide = true else if (is(name, "--slide-graph")) out.slide_graph = v else if (is(name, "--parallel")) out.parallel = v else if (is(name, "--backend")) out.backend = v;
++    } else if (is(name, "--compact-memory")) out.compact_memory = v else if (is(name, "--slide")) out.slide = true else if (is(name, "--slide-graph")) out.slide_graph = v else if (is(name, "--parallel")) out.parallel = v else if (is(name, "--backend")) out.backend = v else if (is(name, "--vision")) out.vision = true else if (is(name, "--vision-max-images")) {
++        const n = try int(u, a, name, v);
++        if (n < 1 or n > 64) return fail(u, a, "argument --vision-max-images: expected 1 to 64 images: '{s}'", .{v});
++        out.vision_max_images = @intCast(n);
++    } else if (is(name, "--vision-image-tokens")) {
++        const n = try int(u, a, name, v);
++        if (n < 16 or n > 16384) return fail(u, a, "argument --vision-image-tokens: expected 16 to 16384 tokens: '{s}'", .{v});
++        out.vision_image_tokens = @intCast(n);
++    }
+ }
+ 
+ /// The CUDA build's --device and --segments; false for any other flag.
+diff --git a/zig/src/server/engines.zig b/zig/src/server/engines.zig
+index de203e3..7f3ce1e 100644
+--- a/zig/src/server/engines.zig
++++ b/zig/src/server/engines.zig
+@@ -31,5 +31,6 @@ pub fn open(a: Allocator, gpa: Allocator, io: std.Io, dir: []const u8, model_typ
+         .slide = args.slide,
+         .device = args.device,
+         .segments = args.segments,
++        .vision = if (args.vision) .{ .image_tokens = args.vision_image_tokens, .max_images = args.vision_max_images } else null,
+     }, problem);
+ }
+diff --git a/zig/src/server/images.zig b/zig/src/server/images.zig
+new file mode 100644
+index 0000000..ab57685
+--- /dev/null
++++ b/zig/src/server/images.zig
+@@ -0,0 +1,186 @@
++//! Image input (--vision): a request's image_url parts to the engine's tower input, and the rendered prompt's
++//! placeholders expanded to each image's tokens, as TensorFold 0.6.6's vision path does for GLM-5.3-Flash.
++const std = @import("std");
++const api = @import("engine_api");
++const json = @import("json.zig");
++const errors = @import("errors.zig");
++const messages_mod = @import("messages.zig");
++const Value = json.Value;
++const Cx = errors.Cx;
++
++/// images.py's limits: an image's and a request's encoded bytes, and the visual tokens of a low-detail image.
++pub const max_image_bytes = 10 << 20;
++pub const max_request_bytes = 20 << 20;
++const low_detail_tokens = 256;
++
++pub const Expanded = struct {
++    ids: []const u32,
++    history_len: usize,
++    images: []const api.Image,
++    cache_key: []const u32,
++};
++
++const Part = struct { url: []const u8, low: bool };
++
++/// The image parts of normalized `messages`, in the order the template meets them.
++fn parts(cx: *Cx, messages: Value) errors.Refused![]const Part {
++    var out: std.ArrayList(Part) = .empty;
++    if (messages != .array) return out.items;
++    for (messages.array) |m| {
++        const content = m.get("content") orelse continue;
++        if (content != .array) continue;
++        for (content.array) |p| {
++            const kind = p.get("type") orelse continue;
++            if (kind != .string or !std.mem.eql(u8, kind.string, "image_url")) continue;
++            const iu = p.get("image_url").?;
++            const detail = iu.get("detail");
++            try out.append(cx.a, .{ .url = iu.get("url").?.string, .low = detail != null and std.mem.eql(u8, detail.?.string, "low") });
++        }
++    }
++    return out.items;
++}
++
++/// A data URL's bytes (base64 or percent-encoded); remote URLs are refused (the native server fetches nothing).
++pub fn dataBytes(cx: *Cx, url: []const u8) errors.Refused![]const u8 {
++    if (std.ascii.startsWithIgnoreCase(url, "http://") or std.ascii.startsWithIgnoreCase(url, "https://"))
++        return cx.refuse("image URLs are not fetched by this server; send the image inline as a data: URL (data:image/png;base64,...)");
++    if (!std.ascii.startsWithIgnoreCase(url, "data:")) return cx.refuse("invalid image data URL");
++    const comma = std.mem.indexOfScalar(u8, url, ',') orelse return cx.refuse("invalid image data URL");
++    const header = url[5..comma];
++    const payload = url[comma + 1 ..];
++    if (header.len > 256) return cx.refuse("invalid image data URL");
++    var it = std.mem.splitScalar(u8, header, ';');
++    _ = it.next();
++    const enc = it.next();
++    if (it.next() != null or (enc != null and !std.ascii.eqlIgnoreCase(enc.?, "base64"))) return cx.refuse("image data URL supports only optional base64 encoding");
++    if (enc != null) {
++        if (payload.len > 4 * ((max_image_bytes + 2) / 3)) return cx.refuse("image data URL exceeds the encoded byte limit");
++        const d = std.base64.standard.Decoder;
++        const n = d.calcSizeForSlice(payload) catch return cx.refuse("invalid image data URL encoding");
++        const out = try cx.a.alloc(u8, n);
++        d.decode(out, payload) catch return cx.refuse("invalid image data URL encoding");
++        if (out.len == 0 or out.len > max_image_bytes) return cx.refuse("image is empty or exceeds the encoded byte limit");
++        return out;
++    }
++    if (payload.len > max_image_bytes * 3) return cx.refuse("image data URL exceeds the encoded byte limit");
++    var out: std.ArrayList(u8) = .empty;
++    var i: usize = 0;
++    while (i < payload.len) : (i += 1) {
++        if (payload[i] == '%' and i + 2 < payload.len) {
++            const b = std.fmt.parseInt(u8, payload[i + 1 .. i + 3], 16) catch return cx.refuse("invalid image data URL encoding");
++            try out.append(cx.a, b);
++            i += 2;
++        } else try out.append(cx.a, payload[i]);
++    }
++    if (out.items.len == 0 or out.items.len > max_image_bytes) return cx.refuse("image is empty or exceeds the encoded byte limit");
++    return out.items;
++}
++
++fn refusal(cx: *Cx, i: usize, err: anyerror) errors.Refused {
++    return switch (err) {
++        error.OutOfMemory => error.OutOfMemory,
++        error.ImageTooLarge => cx.refuse(try std.fmt.allocPrint(cx.a, "image {d} exceeds the limits: 10 MB encoded, 8192 pixels a side, 16 megapixels", .{i + 1})),
++        error.Animated => cx.refuse(try std.fmt.allocPrint(cx.a, "image {d}: animated and multipage images are unsupported; send a single frame", .{i + 1})),
++        error.ImageTooSmall => cx.refuse(try std.fmt.allocPrint(cx.a, "image {d}: the visual-token budget is too small for an image", .{i + 1})),
++        else => cx.refuse(try std.fmt.allocPrint(cx.a, "image {d} could not be decoded; send PNG, JPEG, GIF, WebP or HEIC", .{i + 1})),
++    };
++}
++
++/// The prompt with each image's placeholder expanded to its tokens, the images for the engine and the prompt as the
++/// cache matches it; null when the engine reads no images. Refuses a placeholder count unlike the image count (the
++/// template writes one per image; prompt text that spells the marker would add one with no image).
++pub fn expand(vision: ?api.Vision, cx: *Cx, messages: Value, ids: []const u32, history_len: usize) errors.Refused!?Expanded {
++    const v = vision orelse return null;
++    const ps = try parts(cx, messages);
++    var marks: usize = 0;
++    for (ids) |t| marks += @intFromBool(t == v.image_token);
++    if (marks != ps.len) return cx.refuse(try std.fmt.allocPrint(cx.a, "the rendered prompt has {d} image placeholders for {d} images; prompt text may not contain the model's image marker", .{ marks, ps.len }));
++    if (ps.len == 0) return null;
++    if (ps.len > v.max_images) return cx.refuse(try std.fmt.allocPrint(cx.a, "a request may hold at most {d} images (--vision-max-images); it has {d}", .{ v.max_images, ps.len }));
++    const budget = v.image_tokens / @as(u32, @intCast(ps.len));
++    if (budget < 1) return cx.refuse("the image count exceeds the visual-token budget");
++    const prepared = try cx.a.alloc(api.PreparedImage, ps.len);
++    var bytes_total: usize = 0;
++    var extra: usize = 0;
++    for (ps, prepared, 0..) |p, *out, i| {
++        const bytes = try dataBytes(cx, p.url);
++        bytes_total += bytes.len;
++        if (bytes_total > max_request_bytes) return cx.refuse("the request's images exceed 20 MB encoded");
++        const cap = if (p.low) @min(budget, low_detail_tokens) else budget;
++        out.* = v.prepare(v.ctx, cx.a, bytes, cap) catch |e| return refusal(cx, i, e);
++        if (out.tokens == 0 or out.tokens > cap) return cx.refuse("the image processor exceeded the per-image visual-token budget");
++        extra += out.tokens - 1;
++    }
++    const n = ids.len + extra;
++    const out_ids = try cx.a.alloc(u32, n);
++    const key = try cx.a.alloc(u32, n);
++    const imgs = try cx.a.alloc(api.Image, ps.len);
++    var hist = history_len;
++    var at: usize = 0;
++    var k: usize = 0;
++    for (ids, 0..) |t, src| {
++        if (t != v.image_token) {
++            out_ids[at] = t;
++            key[at] = t;
++            at += 1;
++            continue;
++        }
++        const img = prepared[k];
++        imgs[k] = .{ .pixels = img.pixels, .gh = img.gh, .gw = img.gw, .at = @intCast(at), .tokens = img.tokens };
++        if (src < history_len) hist += img.tokens - 1;
++        for (0..img.tokens) |j| {
++            out_ids[at + j] = t;
++            // the cache's ids for this image's rows: past the vocabulary, by content and row
++            key[at + j] = 0x8000_0000 | @as(u32, @truncate(std.hash.Wyhash.hash(img.hash, std.mem.asBytes(&j)) & 0x7fff_ffff));
++        }
++        at += img.tokens;
++        k += 1;
++    }
++    return .{ .ids = out_ids, .history_len = hist, .images = imgs, .cache_key = key };
++}
++
++test "data URLs decode; remote URLs are refused" {
++    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
++    defer arena.deinit();
++    var cx: Cx = .{ .a = arena.allocator() };
++    try std.testing.expectEqualStrings("hi!", try dataBytes(&cx, "data:image/png;base64,aGkh"));
++    try std.testing.expectEqualStrings("a b", try dataBytes(&cx, "data:text/plain,a%20b"));
++    try std.testing.expectError(error.Refused, dataBytes(&cx, "https://example.com/x.png"));
++    try std.testing.expectError(error.Refused, dataBytes(&cx, "data:image/png;base64,***"));
++}
++
++fn fakePrepare(ctx: *anyopaque, a: std.mem.Allocator, bytes: []const u8, max_tokens: u32) anyerror!api.PreparedImage {
++    _ = ctx;
++    _ = max_tokens;
++    const tokens: u32 = @intCast(bytes.len); // the test's images: one token a byte
++    return .{ .pixels = try a.alloc(f32, 0), .gh = 2, .gw = 2 * tokens, .tokens = tokens, .hash = bytes[0] };
++}
++
++test "placeholders expand to each image's tokens, the history and cache key with them" {
++    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
++    defer arena.deinit();
++    const a = arena.allocator();
++    var cx: Cx = .{ .a = a };
++    var dummy: u8 = 0;
++    const v: api.Vision = .{ .ctx = &dummy, .prepare = fakePrepare, .image_token = 9, .image_tokens = 64, .max_images = 4 };
++    const text =
++        \\[{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:,ab"}}, {"type": "text", "text": "x"}]},
++        \\ {"role": "assistant", "content": "y"},
++        \\ {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:,cde"}}]}]
++    ;
++    const msgs = switch (try json.parseText(a, text)) {
++        .ok => |m| m,
++        .err => return error.TestUnexpectedResult,
++    };
++    const ids = [_]u32{ 1, 9, 2, 3, 9, 4 };
++    const x = (try expand(v, &cx, msgs, &ids, 4)).?;
++    try std.testing.expectEqualSlices(u32, &.{ 1, 9, 9, 2, 3, 9, 9, 9, 4 }, x.ids);
++    try std.testing.expectEqual(@as(usize, 5), x.history_len); // the first image is in the history, the second not
++    try std.testing.expectEqual(@as(u32, 1), x.images[0].at);
++    try std.testing.expectEqual(@as(u32, 5), x.images[1].at);
++    try std.testing.expect(x.cache_key[1] >= 0x8000_0000 and x.cache_key[1] != x.cache_key[2]);
++    try std.testing.expectEqual(@as(u32, 2), x.cache_key[3]);
++    // a placeholder the images do not account for is refused
++    try std.testing.expectError(error.Refused, expand(v, &cx, msgs, &[_]u32{ 9, 9, 9 }, 0));
++    _ = messages_mod;
++}
+diff --git a/zig/src/server/messages.zig b/zig/src/server/messages.zig
+index 9559ed7..de35f4b 100644
+--- a/zig/src/server/messages.zig
++++ b/zig/src/server/messages.zig
+@@ -23,6 +23,36 @@ fn withField(cx: *Cx, o: *const json.Object, key: []const u8, value: Value) !*js
+ 
+ /// ``normalize_messages`` (text only): leading system and developer text merged, later ones as ``late_system``; a template that needs a user query gains one user turn after a trailing tool run.
+ pub fn normalize(cx: *Cx, messages: ?Value, late_system: []const u8, needs_user_after_tool: bool) errors.Refused!Value {
++    return normalizeWith(cx, messages, late_system, needs_user_after_tool, false);
++}
++
++/// One image part as the template and the image path read it: {"type": "image_url", "image_url": {"url", "detail"?}}.
++fn imagePart(cx: *Cx, part: Value) errors.Refused!Value {
++    const iu = part.get("image_url") orelse return cx.refuse("an image_url content part must contain image_url");
++    var url: []const u8 = "";
++    var detail: ?Value = null;
++    if (iu == .string) url = iu.string else if (iu == .object) {
++        const u = iu.get("url") orelse return cx.refuse("image_url must contain a url string");
++        if (u != .string) return cx.refuse("image_url must contain a url string");
++        url = u.string;
++        detail = iu.get("detail");
++        if (detail) |d| if (d != .string or !(std.mem.eql(u8, d.string, "auto") or std.mem.eql(u8, d.string, "low") or std.mem.eql(u8, d.string, "high")))
++            return cx.refuse("image_url detail must be auto, low or high");
++    } else return cx.refuse("image_url must be a url string or an object with one");
++    if (url.len == 0) return cx.refuse("image_url must contain a url string");
++    for ([_][]const u8{ "audio", "input_audio", "video", "video_url" }) |k| if (json.truthyField(part, k)) return cx.refuse("image_url parts cannot contain other media");
++    const inner = try json.newObject(cx.a);
++    try inner.put(cx.a, "url", .{ .string = url });
++    if (detail) |d| try inner.put(cx.a, "detail", d);
++    const out = try json.newObject(cx.a);
++    try out.put(cx.a, "type", .{ .string = "image_url" });
++    try out.put(cx.a, "image_url", .{ .object = inner });
++    return .{ .object = out };
++}
++
++/// `normalize`, and with `images` (an engine that reads them) a user message's image_url parts kept beside its text
++/// parts, in order, for the template's image markers; a message without image parts is joined text as before.
++pub fn normalizeWith(cx: *Cx, messages: ?Value, late_system: []const u8, needs_user_after_tool: bool, images: bool) errors.Refused!Value {
+     const list = messages orelse return cx.refuse("messages must be a non-empty list");
+     if (list != .array or list.array.len == 0) return cx.refuse("messages must be a non-empty list");
+     var out: std.ArrayList(Value) = .empty;
+@@ -36,14 +66,28 @@ pub fn normalize(cx: *Cx, messages: ?Value, late_system: []const u8, needs_user_
+         var item: *json.Object = message.object;
+         if (content != null and content.? == .array) {
+             var text: std.ArrayList(u8) = .empty;
++            var parts: std.ArrayList(Value) = .empty; // with images: text and image parts in order
++            var has_image = false;
+             for (content.?.array) |part| {
+-                const typed = part == .object and part.get("type") != null and part.get("type").? == .string and std.mem.eql(u8, part.get("type").?.string, "text");
+-                if (!typed or fields.hasMedia(part)) return cx.refuse("this server accepts text parts only; image, audio and video inputs are unsupported");
++                const kind = if (part == .object and part.get("type") != null and part.get("type").? == .string) part.get("type").?.string else "";
++                if (images and std.mem.eql(u8, kind, "image_url")) {
++                    if (!std.mem.eql(u8, role.?.string, "user")) return cx.refuse("image parts are accepted in user messages only");
++                    try parts.append(cx.a, try imagePart(cx, part));
++                    has_image = true;
++                    continue;
++                }
++                if (!std.mem.eql(u8, kind, "text") or fields.hasMedia(part)) return cx.refuse(if (images) "content parts must be text or image_url; audio and video inputs are unsupported" else "this server accepts text parts only; image, audio and video inputs are unsupported");
+                 const t = part.get("text") orelse return cx.refuse("a text content part must contain a text string");
+                 if (t != .string) return cx.refuse("a text content part must contain a text string");
+                 try text.appendSlice(cx.a, t.string);
++                if (images) {
++                    const tp = try json.newObject(cx.a);
++                    try tp.put(cx.a, "type", .{ .string = "text" });
++                    try tp.put(cx.a, "text", t);
++                    try parts.append(cx.a, .{ .object = tp });
++                }
+             }
+-            item = try withField(cx, message.object, "content", .{ .string = text.items });
++            item = try withField(cx, message.object, "content", if (has_image) Value{ .array = parts.items } else Value{ .string = text.items });
+         } else if (content == null or content.? == .null) {
+             item = try withField(cx, message.object, "content", .{ .string = "" });
+         } else if (content.? != .string) {
+diff --git a/zig/src/server/openai.zig b/zig/src/server/openai.zig
+index 0d2c0ae..69f0faa 100644
+--- a/zig/src/server/openai.zig
++++ b/zig/src/server/openai.zig
+@@ -123,10 +123,10 @@ fn plan(srv: *Server, cx: *Cx, is_chat: bool, raw: Value) errors.Refused!Plan {
+     if (srv.config.request_log) |path| request_log.append(cx.a, path, body);
+     var input: chat.Input = .{ .fields = undefined };
+     if (is_chat) {
+-        input.messages = try messages.normalize(cx, body.get("messages"), "system", srv.needs_user_after_tool);
++        input.messages = try messages.normalizeWith(cx, body.get("messages"), "system", srv.needs_user_after_tool, srv.info.vision != null);
+         input.tools = try tool_specs.active(cx, body.get("tools"), body.get("tool_choice"));
+     } else if (body.get("messages")) |m| if (m == .array and m.array.len > 0) {
+-        input.messages = try messages.normalize(cx, m, "system", srv.needs_user_after_tool);
++        input.messages = try messages.normalizeWith(cx, m, "system", srv.needs_user_after_tool, srv.info.vision != null);
+     };
+     if (!is_chat and input.messages.array.len == 0) input.prompt = try legacyPrompt(srv, cx, body.get("prompt"));
+     // ``body.get("max_tokens") or body.get("max_completion_tokens")``: both are ints or None by now
+diff --git a/zig/src/server/prompt.zig b/zig/src/server/prompt.zig
+index 10a6be8..065d78b 100644
+--- a/zig/src/server/prompt.zig
++++ b/zig/src/server/prompt.zig
+@@ -15,7 +15,7 @@ pub const isTitle = messages_mod.isTitleRequest;
+ 
+ /// ``render_prompt_ids``: messages normalized for this template, rendered, and a dangling ``<think>`` closed.
+ pub fn renderIds(srv: *Server, cx: *Cx, messages: Value, tools: []const Value, thinking: bool, effort: ?[]const u8, generation: bool) errors.Refused![]const u32 {
+-    const normalized = try messages_mod.toolArguments(cx, try messages_mod.normalize(cx, messages, srv.late_system, srv.needs_user_after_tool));
++    const normalized = try messages_mod.toolArguments(cx, try messages_mod.normalizeWith(cx, messages, srv.late_system, srv.needs_user_after_tool, srv.info.vision != null));
+     var problem: []const u8 = "";
+     const options: model_text.RenderOptions = .{
+         .tools = if (tools.len > 0) Value{ .array = @constCast(tools) } else null,
+diff --git a/zig/src/server/root.zig b/zig/src/server/root.zig
+index b83b10f..34480f3 100644
+--- a/zig/src/server/root.zig
++++ b/zig/src/server/root.zig
+@@ -37,6 +37,7 @@ test {
+     _ = @import("process_memory.zig");
+     _ = @import("log.zig");
+     _ = @import("messages.zig");
++    _ = @import("images.zig");
+     _ = @import("stream_preflight_test.zig");
+     _ = @import("late_system_test.zig");
+     _ = @import("compact_test.zig");
+diff --git a/zig/src/server/server.zig b/zig/src/server/server.zig
+index 45595de..8f563d3 100644
+--- a/zig/src/server/server.zig
++++ b/zig/src/server/server.zig
+@@ -58,6 +58,7 @@ pub const Config = struct {
+ };
+ 
+ pub const Server = struct {
++    greedy_noted: std.atomic.Value(bool) = .init(false), // the greedy-only notice, logged once
+     gpa: Allocator,
+     io: std.Io,
+     engine: api.Engine,
+@@ -139,6 +140,10 @@ pub const Server = struct {
+         try merge(options, cx, try fields.parseNumbers(cx, f));
+         const temp = number(options.get("temperature")) orelse 0;
+         if (temp <= 0) return null;
++        if (srv.info.greedy_only) { // clients that always send a temperature still get a reply, the greedy one
++            if (!srv.greedy_noted.swap(true, .monotonic)) std.log.info("this engine decodes greedily only: requests with a temperature are served greedily", .{});
++            return null;
++        }
+         const seed: u64 = if (options.get("seed")) |s| seedBits(s) else api.seedFor(prompt_ids, srv.config.seed_salt);
+         return .{
+             .seed = seed,
+diff --git a/zig/tests/glm_vision.zig b/zig/tests/glm_vision.zig
+new file mode 100644
+index 0000000..e867a1d
+--- /dev/null
++++ b/zig/tests/glm_vision.zig
+@@ -0,0 +1,148 @@
++//! GLM-5.3-Flash's image tower against a reference dump (the recipe's tools/vision_reference.py: mlx-vlm's tower).
++const std = @import("std");
++const mtl = @import("metal");
++const tf = @import("tensorfold");
++const vision = tf.glm.vision;
++
++const usage =
++    \\tf-glm-vision MODEL_DIR REF_DIR [STAGE] [IMAGE]
++    \\REF_DIR holds meta.json (grid_thw), patches.f32 and the stage's reference: embed.f32 (STAGE embed, after the patch
++    \\projection), block0.f32 (STAGE block0, after the first block), blocks.f32 (STAGE blocks, after the last) or
++    \\features.f32 (STAGE features, the default: the tower's output rows). Writes native_STAGE.f32 there and prints the
++    \\largest and mean absolute differences, the reference's mean magnitude and the rows' cosine similarity.
++    \\IMAGE: prepare the patches from this file natively (decode, resize, pad, normalize), compare them with
++    \\patches.f32 value by value, and run the tower on them instead (meta.json's max_tokens is the budget).
++;
++
++fn readFile(a: std.mem.Allocator, dir: []const u8, name: []const u8) ![]u8 {
++    const path = try std.fmt.allocPrintSentinel(a, "{s}/{s}", .{ dir, name }, 0);
++    const f = try mtl.MappedFile.open(path);
++    defer f.deinit();
++    return a.dupe(u8, f.bytes[0..f.size]);
++}
++
++fn bf16ToF32(x: u16) f32 {
++    return @bitCast(@as(u32, x) << 16);
++}
++
++pub fn main(init: std.process.Init) !void {
++    const a = init.arena.allocator();
++    const args = try init.minimal.args.toSlice(a);
++    if (args.len < 3) {
++        std.debug.print("{s}\n", .{usage});
++        return error.Usage;
++    }
++    const dir = args[1];
++    const ref = args[2];
++    const stage = if (args.len > 3) args[3] else "features";
++    const stop: ?u32 = if (std.mem.eql(u8, stage, "embed")) 0 else if (std.mem.eql(u8, stage, "block0")) 1 else if (std.mem.eql(u8, stage, "blocks")) vision.depth else if (std.mem.eql(u8, stage, "features")) null else return error.Usage;
++
++    const meta = try std.json.parseFromSliceLeaky(std.json.Value, a, try readFile(a, ref, "meta.json"), .{});
++    const grid = meta.object.get("grid_thw").?.array.items;
++    const gh: u32 = @intCast(grid[1].integer);
++    const gw: u32 = @intCast(grid[2].integer);
++    const raw = try readFile(a, ref, "patches.f32");
++    var pixels = try a.alloc(f32, raw.len / 4);
++    @memcpy(std.mem.sliceAsBytes(pixels), raw[0 .. pixels.len * 4]);
++    const P = gh * gw;
++    const T = P / vision.patches_per_token;
++
++    const device = try mtl.Device.init();
++    const pool = mtl.objc.Pool.push();
++    defer pool.pop();
++    const queue = try device.queue();
++    const cfg_text = try readFile(a, dir, "config.json");
++    const proc_text = readFile(a, dir, "processor_config.json") catch null;
++    const c = (try vision.Config.parse(a, cfg_text, proc_text)) orelse return error.NoVisionConfig;
++    if (args.len > 4) {
++        const img_path = try std.fmt.allocPrintSentinel(a, "{s}", .{args[4]}, 0);
++        const f = try mtl.MappedFile.open(img_path);
++        defer f.deinit();
++        const max_tokens: u32 = @intCast(meta.object.get("max_tokens").?.integer);
++        const t0i = std.Io.Clock.awake.now(init.io).toNanoseconds();
++        const prep = try tf.glm.image.prepare(a, f.bytes[0..f.size], c, max_tokens);
++        const t1i = std.Io.Clock.awake.now(init.io).toNanoseconds();
++        std.debug.print("prepared {s}: grid {d}x{d}, {d} tokens in {d:.1} ms\n", .{ args[4], prep.gh, prep.gw, prep.tokens, @as(f64, @floatFromInt(t1i - t0i)) / 1e6 });
++        if (prep.gh != gh or prep.gw != gw) {
++            std.debug.print("grid differs from the reference's {d}x{d}\n", .{ gh, gw });
++            return error.GridMismatch;
++        }
++        var differ: usize = 0;
++        var max_p: f32 = 0;
++        for (prep.pixels, pixels) |x, y| {
++            if (x != y) differ += 1;
++            max_p = @max(max_p, @abs(x - y));
++        }
++        std.debug.print("patches: {d} of {d} values differ from the reference (largest {d:.6})\n", .{ differ, pixels.len, max_p });
++        pixels = prep.pixels;
++    }
++    var t0 = std.Io.Clock.awake.now(init.io).toNanoseconds();
++    const v = try vision.Vision.load(std.heap.page_allocator, device, dir, c, @max(T, 1024));
++    defer v.deinit();
++    var t1 = std.Io.Clock.awake.now(init.io).toNanoseconds();
++    std.debug.print("tower loaded in {d:.2} s ({d:.2} GiB with scratch for {d} patches, attention chunks of {d} rows)\n", .{ @as(f64, @floatFromInt(t1 - t0)) / 1e9, @as(f64, @floatFromInt(v.bytes)) / (1 << 30), v.max_patches, v.chunk });
++    const out_buf = try device.buffer(@as(usize, T) * vision.out_hidden * 2, mtl.ResourceOptions.shared);
++    defer out_buf.deinit();
++
++    for (0..2) |run| { // the second run is the timed one (the first compiles pipelines' state on the GPU)
++        const cb = queue.commandBuffer();
++        const enc = cb.compute(.serial);
++        t0 = std.Io.Clock.awake.now(init.io).toNanoseconds();
++        try v.encode(enc, pixels, gh, gw, .{ .buf = out_buf }, stop);
++        enc.end();
++        cb.commit();
++        cb.wait();
++        t1 = std.Io.Clock.awake.now(init.io).toNanoseconds();
++        if (cb.failure()) |msg| {
++            std.debug.print("command buffer failed: {s}\n", .{msg});
++            return error.GpuFailed;
++        }
++        if (run == 1) std.debug.print("encode: {d} patches -> {d} tokens in {d:.1} ms\n", .{ P, T, @as(f64, @floatFromInt(t1 - t0)) / 1e6 });
++    }
++    // the stage's rows: the residual stream for a stop, else the output rows
++    const width: usize = if (stop != null) vision.hidden else vision.out_hidden;
++    const rows: usize = if (stop != null) P else T;
++    const src: [*]const u16 = if (stop != null) @ptrCast(@alignCast(v.x.addr())) else @ptrCast(@alignCast(out_buf.contents()));
++    const got = try a.alloc(f32, rows * width);
++    for (got, 0..) |*g, i| g.* = bf16ToF32(src[i]);
++    const name = try std.fmt.allocPrint(a, "native_{s}.f32", .{stage});
++    {
++        const path = try std.fmt.allocPrint(a, "{s}/{s}", .{ ref, name });
++        const f = try std.Io.Dir.cwd().createFile(init.io, path, .{});
++        defer f.close(init.io);
++        try f.writeStreamingAll(init.io, std.mem.sliceAsBytes(got));
++    }
++    const want_raw = try readFile(a, ref, try std.fmt.allocPrint(a, "{s}.f32", .{stage}));
++    const want = try a.alloc(f32, want_raw.len / 4);
++    @memcpy(std.mem.sliceAsBytes(want), want_raw[0 .. want.len * 4]);
++    if (want.len != got.len) {
++        std.debug.print("size: native {d} values, reference {d}\n", .{ got.len, want.len });
++        return error.SizeMismatch;
++    }
++    var max_d: f64 = 0;
++    var sum_d: f64 = 0;
++    var sum_m: f64 = 0;
++    var worst_cos: f64 = 1;
++    var mean_cos: f64 = 0;
++    for (0..rows) |r| {
++        var dot: f64 = 0;
++        var ng: f64 = 0;
++        var nw: f64 = 0;
++        for (0..width) |j| {
++            const g: f64 = got[r * width + j];
++            const w: f64 = want[r * width + j];
++            const d = @abs(g - w);
++            max_d = @max(max_d, d);
++            sum_d += d;
++            sum_m += @abs(w);
++            dot += g * w;
++            ng += g * g;
++            nw += w * w;
++        }
++        const cs = dot / (@sqrt(ng * nw) + 1e-30);
++        worst_cos = @min(worst_cos, cs);
++        mean_cos += cs;
++    }
++    const n: f64 = @floatFromInt(got.len);
++    std.debug.print("{s}: max |d| {d:.4}, mean |d| {d:.5}, mean |ref| {d:.4}, cosine mean {d:.6} worst {d:.6} ({d} rows of {d})\n", .{ stage, max_d, sum_d / n, sum_m / n, mean_cos / @as(f64, @floatFromInt(rows)), worst_cos, rows, width });
++}
