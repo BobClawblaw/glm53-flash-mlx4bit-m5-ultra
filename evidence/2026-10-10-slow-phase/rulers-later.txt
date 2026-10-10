@@ -1,0 +1,41 @@
+== run 1 17:21:03 logbyte 6469454 powermetrics:yes
+  c=1   prose         92.6 /    92.6 tok/s   ttft 0.12s   224 tokens a reply
+  c=1   code         104.9 /   104.9 tok/s   ttft 0.14s   256 tokens a reply
+  c=1   structured    98.7 /    98.7 tok/s   ttft 0.14s   170 tokens a reply
+  c=1   list          96.3 /    96.3 tok/s   ttft 0.11s   81 tokens a reply
+== run 2 17:21:27 logbyte 6589296 powermetrics:no
+  c=1   prose         92.0 /    92.0 tok/s   ttft 0.12s   224 tokens a reply
+  c=1   code         104.3 /   104.3 tok/s   ttft 0.14s   256 tokens a reply
+  c=1   structured    98.3 /    98.3 tok/s   ttft 0.14s   170 tokens a reply
+  c=1   list          96.9 /    96.9 tok/s   ttft 0.11s   81 tokens a reply
+== run 3 17:21:51 logbyte 6709892 powermetrics:no
+  c=1   prose         92.0 /    92.0 tok/s   ttft 0.12s   224 tokens a reply
+  c=1   code         104.5 /   104.5 tok/s   ttft 0.14s   256 tokens a reply
+  c=1   structured    99.6 /    99.6 tok/s   ttft 0.14s   170 tokens a reply
+  c=1   list          96.4 /    96.4 tok/s   ttft 0.11s   81 tokens a reply
+== run 4 17:22:15 logbyte 6829253 powermetrics:no
+  c=1   prose         92.0 /    92.0 tok/s   ttft 0.12s   224 tokens a reply
+  c=1   code         104.6 /   104.6 tok/s   ttft 0.14s   256 tokens a reply
+  c=1   structured    98.6 /    98.6 tok/s   ttft 0.14s   170 tokens a reply
+  c=1   list          96.8 /    96.8 tok/s   ttft 0.11s   81 tokens a reply
+== run 5 17:22:39 logbyte 6948994 powermetrics:no
+  c=1   prose         92.1 /    92.1 tok/s   ttft 0.12s   224 tokens a reply
+  c=1   code         104.1 /   104.1 tok/s   ttft 0.14s   256 tokens a reply
+  c=1   structured    99.2 /    99.2 tok/s   ttft 0.14s   170 tokens a reply
+  c=1   list          94.1 /    94.1 tok/s   ttft 0.11s   81 tokens a reply
+== run 6 17:23:03 logbyte 7068034 powermetrics:no
+  c=1   prose         92.2 /    92.2 tok/s   ttft 0.12s   224 tokens a reply
+  c=1   code         103.9 /   103.9 tok/s   ttft 0.14s   256 tokens a reply
+  c=1   structured    99.2 /    99.2 tok/s   ttft 0.15s   170 tokens a reply
+  c=1   list          96.4 /    96.4 tok/s   ttft 0.11s   81 tokens a reply
+== run 7 17:23:27 logbyte 7187231 powermetrics:no
+  c=1   prose         92.0 /    92.0 tok/s   ttft 0.12s   224 tokens a reply
+  c=1   code         103.8 /   103.8 tok/s   ttft 0.14s   256 tokens a reply
+  c=1   structured    98.9 /    98.9 tok/s   ttft 0.14s   170 tokens a reply
+  c=1   list          95.7 /    95.7 tok/s   ttft 0.11s   81 tokens a reply
+== run 8 17:23:51 logbyte 7306982 powermetrics:no
+  c=1   prose         91.8 /    91.8 tok/s   ttft 0.12s   224 tokens a reply
+  c=1   code         104.4 /   104.4 tok/s   ttft 0.14s   256 tokens a reply
+  c=1   structured    98.4 /    98.4 tok/s   ttft 0.14s   170 tokens a reply
+  c=1   list          96.8 /    96.8 tok/s   ttft 0.11s   81 tokens a reply
+end logbyte 7426462

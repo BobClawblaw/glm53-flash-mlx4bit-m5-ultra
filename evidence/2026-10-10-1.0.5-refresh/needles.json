@@ -1,0 +1,22 @@
+[
+ {
+  "nominal": 600000,
+  "seed": 23,
+  "tokens": 484587,
+  "depth": 0.5,
+  "found": true,
+  "seconds": 292.6220252920175,
+  "prefill_tok_s": 1656.0168344006713,
+  "reply": "5-8-6-1-1"
+ },
+ {
+  "nominal": 1150000,
+  "seed": 29,
+  "tokens": 926623,
+  "depth": 0.5,
+  "found": true,
+  "seconds": 652.4408283340745,
+  "prefill_tok_s": 1420.2406712743823,
+  "reply": "2-5-6-7-4"
+ }
+]

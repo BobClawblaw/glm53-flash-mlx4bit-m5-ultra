@@ -1,0 +1,7 @@
+zai-logo.png 96x96 detail=auto: 52 prompt tokens, first token 0.15-1.03 s (median 0.15); reply: 'A black rounded square icon containing a white stylized letter "Z" with a horizo'
+shapes.png 517x389 detail=auto: 303 prompt tokens, first token 0.35-0.35 s (median 0.35); reply: 'A large red circle on the left and a blue square on the right sit on a light gra'
+large.png 2000x1500 detail=auto: 3925 prompt tokens, first token 4.34-4.34 s (median 4.34); reply: 'A vibrant abstract composition featuring diagonal rainbow-colored gradient strip'
+large.png 2000x1500 detail=high: 3924 prompt tokens, first token 4.34-4.34 s (median 4.34); reply: 'A vibrant abstract composition featuring diagonal rainbow-gradient stripes flowi'
+large.png 2000x1500 detail=low run 0: 288 prompt tokens, first token 1.28 s
+large.png 2000x1500 detail=low run 1: 289 prompt tokens, first token 0.39 s
+large.png 2000x1500 detail=low run 2: 289 prompt tokens, first token 0.38 s

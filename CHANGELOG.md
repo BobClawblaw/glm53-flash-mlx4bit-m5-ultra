@@ -2,6 +2,11 @@
 
 ## 2026-10-10
 
+- **Long prompts and images remeasured on 1.0.5.** Needles found at 484,587 tokens in 293 s (1,656 tok/s; 880 s on
+  1.0.4) and 926,623 in 652 s (1,420 tok/s; 2,533 s on 1.0.4). Images to first token: a 96x96 logo 0.15 s, a 517x389
+  drawing 0.35 s (2.1 s on 1.0.3), a 2000x1500 image at the full 4,096-token budget 4.34 s (6.4 s)
+  (`evidence/2026-10-10-1.0.5-refresh/`). The intermittent slow ruler phase was not reproduced in 22 runs
+  (`evidence/2026-10-10-slow-phase/`, `tools/slowhunt.py`).
 - **Wired loads no longer wait on free memory.** With `GLM_WIRE` the weight reads skip 1.0.5's paced-read wait
   (`glm-one-mac-vision-pool-wiredreads-v1.0.5.patch`): the buffers are wired before the reads, so a read takes no free
   page, and ~20 GB of other file cache kept free memory under the wait's 8 GB floor, stalling a load at 200 GiB wired

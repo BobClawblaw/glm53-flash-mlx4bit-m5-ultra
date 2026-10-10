@@ -67,7 +67,10 @@ Tokens a second. The thinking-on run's ruler measured 92.3 / 105.0 / 99.3 / 97.2
 decodes at 73 tok/s and drafted at 91, on the suite's `drafts` prompts. On 1.0.4 the same ruler measured 93.3 /
 104.6 / 104.2 / 89.7 with one stream, and a lone request's list phase dropped to 55 tok/s with three streams; 1.0.5
 does not show that. Two early ruler runs on 1.0.5 each had one slow phase (structured 61, then list 42) with the
-same tokens and the same draft rounds; the four runs since agree with the table, and the cause was not found.
+same tokens and the same draft rounds, and a third run later did the same (list 42). 22 ruler runs and 24 single
+requests with the engine's per-round timing on never repeated it: decode is GPU-bound (~94% of the wall time), and
+neither the time since load nor other GPU work explains it. The cause is open
+([`evidence/2026-10-10-slow-phase/`](evidence/2026-10-10-slow-phase/)).
 
 Concurrent requests share the engine's decode rounds, so a request that arrives during another's long reply starts
 at once instead of queueing behind it. They share the throughput rather than add to it: one stream's rounds already
@@ -86,8 +89,8 @@ A fourth concurrent request waits for a stream. `parallel = 1` restores one repl
 Prompt passes, one prompt each, the needle found in every one, read whole (the prompt cache resumed at 0). To 200k
 they come from the 1.0.5 long-context check with thinking off
 ([`evidence/2026-10-10-1.0.5/suite/long-context.json`](evidence/2026-10-10-1.0.5/suite/long-context.json)); the
-two longest were measured on 1.0.4 with the suite's needle function
-([`evidence/2026-10-09-long-1m/`](evidence/2026-10-09-long-1m/)):
+two longest from the suite's needle function, each on its own document so the prompt cache resumed none of it
+([`evidence/2026-10-10-1.0.5-refresh/`](evidence/2026-10-10-1.0.5-refresh/)):
 
 | Prompt | Time to first token | Rate |
 |---:|---:|---:|
@@ -96,19 +99,25 @@ two longest were measured on 1.0.4 with the suite's needle function
 | 50,981 | 28.3-28.4 s | 1,794-1,800 tok/s |
 | 102,081 | 57.7 s | 1,768 tok/s |
 | 200,366 | 117.4-119.2 s | 1,681-1,707 tok/s |
-| 484,568 (1.0.4) | 880 s | 551 tok/s |
-| 926,599 (1.0.4) | 2,533 s | 366 tok/s |
+| 484,587 | 293 s | 1,656 tok/s |
+| 926,623 | 652 s | 1,420 tok/s |
 
-1.0.5 reads prompts in chunks of up to 16,384 tokens (4,096 on 1.0.4), about twice as fast at 100-200k.
+1.0.5 reads prompts in chunks of up to 16,384 tokens (4,096 on 1.0.4): about twice as fast as 1.0.4 at 100-200k,
+three times at 485k (880 s on 1.0.4) and nearly four times at 927k (2,533 s).
 
-Images ([`evidence/2026-10-09-native-vision-1.0.3.md`](evidence/2026-10-09-native-vision-1.0.3.md)):
+Images on 1.0.5: request to first token, streamed, thinking off, three runs each with different text ahead of the
+image so the prompt cache resumed none of them
+([`evidence/2026-10-10-1.0.5-refresh/images.txt`](evidence/2026-10-10-1.0.5-refresh/images.txt)):
 
-| Image | Tokens | Preprocess | Tower | Request to first token |
-|---|---:|---:|---:|---:|
-| 96x96 logo | 16 | 1.6 ms | 8 ms | 0.5 s |
-| 517x389 drawing | 266 | 3.4 ms | 26 ms | 2.1 s |
-| 2000x1500 photo-like, 1,024-token budget | 972 | 43 ms | 154 ms | |
-| 2000x1500, the full 4,096-token budget | 3,909 prompt tokens | | | 6.4 s |
+| Image | Prompt tokens | Request to first token | 1.0.3 |
+|---|---:|---:|---:|
+| 96x96 logo | 52 | 0.15 s (1.03 s the first request after load) | 0.5 s |
+| 517x389 drawing | 303 | 0.35 s | 2.1 s |
+| 2000x1500, `"detail": "low"` | 289 | 0.38-0.39 s (1.28 s the first) | |
+| 2000x1500, default detail (the full 4,096-token budget) | 3,925 | 4.34 s | 6.4 s |
+
+The tower itself: 8 ms for 64 patches, 26 ms for 1,064, 154 ms for 3,888; preprocessing 2-43 ms
+([`evidence/2026-10-09-native-vision-1.0.3.md`](evidence/2026-10-09-native-vision-1.0.3.md)).
 
 Memory, with the model and tower wired. GLM's caches are small: most of its layers keep constant-size state. The
 default load on 1.0.5, three streams sharing the 1,048,576-token pool: 21.4 s, 201.4 GiB wired and 39.9 GiB free
