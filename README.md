@@ -19,7 +19,7 @@ Stock TensorFold 1.0.4 refuses this checkpoint on one 256 GB Mac and serves GLM 
 [`patches/glm-one-mac-vision-v1.0.4.patch`](patches/), pinned by sha256, changes four things:
 
 1. **The one-Mac load limit.** GLM's native engine allows 70% of RAM, 179.2 GB here. The language model alone is
-   180.6 GB. `TENSORFOLD_MEMORY_LIMIT_GB` now sets the limit, and the recipe uses 200.
+   180.6 GB. `TENSORFOLD_MEMORY_LIMIT_GB` now sets the limit, and the recipe uses 210 (215 for the 1M window).
 2. **Wired loading.** Past about 110 GB of freshly written buffers, the GPU driver's wired collector handed the
    buffers no command had touched yet to the VM compressor: 145 GiB at the peak, with pressure still normal. One
    unwired load ended with jetsam killing about 300 system daemons, then the server. With `GLM_RESIDENCY` +
@@ -51,8 +51,23 @@ The defaults: one stream, MTP drafts, vision on, model wired, measured on 131,07
 |---:|---:|---:|---:|---:|---:|
 | 1 | 93.3 | 104.6 | 104.2 | 89.7 | 0.23-0.29 s |
 
-Tokens a second. Undrafted, one stream decodes at 63 tok/s and drafted at 81, on the suite's `drafts` prompts. The
-recipe serves one stream (`parallel = 1`): it gives up concurrency for the memory headroom of one 256 GB Mac.
+Tokens a second. Undrafted, one stream decodes at 63 tok/s and drafted at 81, on the suite's `drafts` prompts.
+
+Three streams by default (`parallel = 3`): concurrent requests share the engine's decode rounds, so a request that
+arrives during another's long reply starts at once instead of queueing behind it. They share the throughput rather
+than add to it: one stream's rounds already fill the GPU with MTP drafts, so a second stream mostly takes the draft
+rows. Aggregate tokens a second, 2 runs, 256-token replies
+([`evidence/2026-10-10-parallel3/ruler/`](evidence/2026-10-10-parallel3/ruler/)):
+
+| Users | each | aggregate | first token |
+|---:|---:|---:|---:|
+| 1 | 55-106 | 55-106 | 0.23-0.69 s |
+| 2 | 46-55 | 93-110 | 0.39-0.68 s |
+| 3 | 33-40 | 102-123 | 0.54-1.52 s |
+
+(Ranges across the prose / code / structured / list phases; the list phase varies most between runs. A lone request
+decodes as fast as with `parallel = 1`.) A fourth concurrent request waits for a stream. `parallel = 1` restores
+one reply at a time and gives back ~10 GB.
 
 Prompt passes, one prompt each, prompt cache off, with the needle found in every one. Up to 102k they come from the
 long-context check's own timings
@@ -87,6 +102,9 @@ Memory, with the model and tower wired. GLM's caches are small: most of its laye
 | 262,144 (default) | 8.9 GB | 189.5 GB | | |
 | 524,288 | 14.0 GB | 194.6 GB | | |
 | 1,048,576 (`PROFILE=long`) | 24.2 GB | 204.8 GB | 202 GiB | ~27 GiB |
+
+One stream each. The default's three streams at 262,144 add about 5 GB a stream: 185.6 GiB wired, ~34 GiB free after
+the load (load limit 210 GB). The long profile keeps one stream: at 1M a stream's caches are ~20 GB.
 
 The load takes 21.7-24 s from a warm disk (80 s unwired), with the compressor and pressure flat. Memory stayed flat
 through the 485k-token prompt pass. The tower is 0.9 GiB, plus 1.2 GiB of scratch for 4,096 image tokens.
@@ -221,16 +239,16 @@ an environment variable of the same name in upper case (`PORT=8890 python3 -m ma
 | Setting | Default | Notes |
 |---|---|---|
 | `host`, `port` | `127.0.0.1`, `8888` | `0.0.0.0` serves the network |
-| `profile` | `chat` | `chat`: MTP drafts; `long`: the full 1,048,576-token window (and `memory_limit_gb` 215); `reference`: `--no-drafts`, the exactness reference |
+| `profile` | `chat` | `chat`: MTP drafts; `long`: the full 1,048,576-token window (one stream, `memory_limit_gb` 215); `reference`: `--no-drafts`, the exactness reference |
 | `context` | 262144 | of the checkpoint's 1,048,576. The caches grow slowly with it (see Memory) |
-| `parallel` | 1 | streams at once. More streams cost cache memory this Mac lacks beside 185 GiB of model |
+| `parallel` | 3 | streams at once, sharing decode rounds (see Measured). About 5 GB of caches a stream at 262k; 1 queues requests |
 | `thinking` | true | reasoning first, in `reasoning_content`. A request sends `chat_template_kwargs: {"enable_thinking": false}` to skip it |
 | `reasoning_effort` | `high` | GLM-5.3's levels are `low`, `high` and `max`. A request's `"reasoning_effort"` overrides it; empty leaves the template's default, `max` |
 | `temperature` | `"0"` | greedy is all the native GLM engine decodes. Requests with a temperature are served greedily |
 | `max_tokens` | 32768 | the reply cap when a request sets none. With thinking on, reasoning counts against it |
 | `prompt_cache_gib` | 4 | kept prompt states, bounded so the load stays predictable |
 | `vision`, `vision_image_tokens`, `vision_max_images` | true, 4096, 4 | see Images |
-| `memory_limit_gb` | 200 | `TENSORFOLD_MEMORY_LIMIT_GB`, the patched one-Mac load limit |
+| `memory_limit_gb` | 210 | `TENSORFOLD_MEMORY_LIMIT_GB`, the patched one-Mac load limit |
 | `residency` | true | `GLM_RESIDENCY` + `GLM_WIRE`: resident and wired before the reads. Keep it on |
 | `memguard*` | 6 GiB free, 12 GiB swap growth, 24 GiB compressor growth | SIGKILL after two readings 2 s apart; 30 s at critical pressure |
 | `memory_margin_gib` | 8 | `up` refuses with less free than the engine's floor plus this |
@@ -282,7 +300,7 @@ and vision only with `vision` on. The suite and the ruler come from the Qwen3.8 
 | Check | What it measures |
 |---|---|
 | `drafts` | drafted replies equal `"draft": false` ones, 12 prompts (MTP drafts must not change greedy text) |
-| `concurrent` | four streams together give the same replies as each alone (queued here) |
+| `concurrent` | four streams together give the same replies as each alone (queued, with `parallel = 1`; the three-stream run is in progress) |
 | `behaviour` | streamed equals non-streamed, facts recalled over six turns, stop strings, thinking mode (`reasoning_content`, no tag leaks), verbatim copy, exact `max_tokens` |
 | `tools` | 60 tool calls: exact function and argument set, optional arguments left out unless asked, parallel calls, no call where none is wanted |
 | `json` | 30 JSON-schema prompts checked by the suite's validator |
@@ -304,7 +322,7 @@ per-stream decode rate and the time to the first content token.
 - Sampled decoding: the native GLM engine is greedy only, and requests with a temperature are served greedily.
 - Structured output (`response_format`, `guided_*`) is refused with a 400: the native engine has none yet.
 - Remote image URLs (send `data:` URLs), video and audio.
-- More than one stream at a time.
+- More than three streams at a time (the long profile: one).
 - The two-Mac `--speed-up` pair with vision.
 - The prompt cache keeps states at planned chunk starts only, so short image chats re-encode their images each turn.
 - No `n > 1`, no logprobs, no presence or frequency penalties. The reasoning field is `reasoning_content`.

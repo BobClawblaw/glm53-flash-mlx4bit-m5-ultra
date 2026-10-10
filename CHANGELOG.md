@@ -2,6 +2,9 @@
 
 ## 2026-10-10
 
+- **Three streams by default** (`parallel = 3`, `memory_limit_gb` 210; the long profile keeps one). Concurrent
+  requests share decode rounds: no queueing behind a long reply, aggregate 93-123 tok/s at two and three users, a lone
+  request as fast as before (`evidence/2026-10-10-parallel3/ruler/`).
 - **A 262,144-token window by default, and the full 1,048,576 with `PROFILE=long`.** GLM's caches are small (8.9 GB at
   262k, 24.2 GB at 1M, beside 180.6 GB of weights); the long profile raises `memory_limit_gb` to 215. At 1M the model
   loads in 24 s, 202 GiB wired, about 27 GiB free. Needles found at 200,465, 484,568 and 926,599 prompt tokens

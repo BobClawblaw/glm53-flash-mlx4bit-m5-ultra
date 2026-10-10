@@ -41,7 +41,7 @@ profile = "chat"                 # chat (MTP drafts) | reference (--no-drafts, t
 # the window, of the checkpoint's 1,048,576. GLM's caches are small: 8.9 GB at 262,144, 24.2 GB at 1,048,576
 # (PROFILE=long), beside 180.6 GB of weights
 context = 262144
-parallel = 1                     # streams admitted at once (shared lanes); 1 is one reply at a time
+parallel = 3                     # streams admitted at once, sharing rounds: ~5 GB of caches each at 262k; 1 queues
 drafts = true
 reasoning_effort = "high"        # GLM-5.3's levels: low, high, max; "" leaves the template's default, max
 thinking = true                  # GLM-5.3 reasons first (reasoning_content); a request can send chat_template_kwargs {"enable_thinking": false}
@@ -62,10 +62,10 @@ vision_max_images = 4
 api_key = ""
 extra_args = ""
 extra_env = ""
-# memory: the engine refuses a one-Mac load past TENSORFOLD_MEMORY_LIMIT_GB (patched; stock: 70% of RAM). 200 GB holds
-# the 180.6 GB of weights and the caches of a 131k window with room; `up` also refuses when free memory is under the
+# memory: the engine refuses a one-Mac load past TENSORFOLD_MEMORY_LIMIT_GB (patched; stock: 70% of RAM). 210 GB holds
+# the 180.6 GB of weights, three streams' caches at 262k and the kept prompt states (~34 GiB left free); `up` also refuses when free memory is under the
 # engine's floor plus memory_margin_gib, and the watchdog below kills the server before the Mac swaps.
-memory_limit_gb = 200
+memory_limit_gb = 210
 residency = true                 # GLM_RESIDENCY and GLM_WIRE: the model resident and wired before its reads
 memory_margin_gib = 8
 memguard = true
@@ -83,6 +83,7 @@ drafts = false
 
 [profiles.long]                   # the full 1,048,576-token window: 204.8 GB of weights and caches, ~20 GiB left free
 context = 1048576
+parallel = 1                      # a stream's caches are ~20 GB at this window: one fits
 memory_limit_gb = 215
 
 # The Spark recipe's quality suite and decode ruler run against any OpenAI-compatible URL. `python3 -m mac suite|ruler`

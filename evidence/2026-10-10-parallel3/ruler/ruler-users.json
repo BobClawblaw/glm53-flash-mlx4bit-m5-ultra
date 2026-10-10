@@ -1,0 +1,115 @@
+{
+ "url": "http://0.0.0.0:8888",
+ "max_tokens": 256,
+ "runs": 2,
+ "cells": [
+  {
+   "concurrency": 1,
+   "phase": "prose",
+   "per_stream": 94.98841534962449,
+   "aggregate": 94.98841534962449,
+   "ttft": 0.6895901039824821,
+   "tokens_mean": 256.0,
+   "runs": 2
+  },
+  {
+   "concurrency": 1,
+   "phase": "code",
+   "per_stream": 105.78983063073395,
+   "aggregate": 105.78983063073395,
+   "ttft": 0.28552147949812934,
+   "tokens_mean": 256.0,
+   "runs": 2
+  },
+  {
+   "concurrency": 1,
+   "phase": "structured",
+   "per_stream": 103.76785421286789,
+   "aggregate": 103.76785421286789,
+   "ttft": 0.2975234789773822,
+   "tokens_mean": 173.0,
+   "runs": 2
+  },
+  {
+   "concurrency": 1,
+   "phase": "list",
+   "per_stream": 55.254692278463466,
+   "aggregate": 55.254692278463466,
+   "ttft": 0.23219743749359623,
+   "tokens_mean": 256.0,
+   "runs": 2
+  },
+  {
+   "concurrency": 2,
+   "phase": "prose",
+   "per_stream": 53.96165901439548,
+   "aggregate": 107.92331802879096,
+   "ttft": 0.42951140651712194,
+   "tokens_mean": 256.0,
+   "runs": 2
+  },
+  {
+   "concurrency": 2,
+   "phase": "code",
+   "per_stream": 54.76395703125658,
+   "aggregate": 109.52791406251316,
+   "ttft": 0.6783118224993814,
+   "tokens_mean": 256.0,
+   "runs": 2
+  },
+  {
+   "concurrency": 2,
+   "phase": "structured",
+   "per_stream": 54.41979626164122,
+   "aggregate": 108.83959252328243,
+   "ttft": 0.4891882292286027,
+   "tokens_mean": 163.5,
+   "runs": 2
+  },
+  {
+   "concurrency": 2,
+   "phase": "list",
+   "per_stream": 46.40234849921075,
+   "aggregate": 92.8046969984215,
+   "ttft": 0.38556852081092075,
+   "tokens_mean": 256.0,
+   "runs": 2
+  },
+  {
+   "concurrency": 3,
+   "phase": "prose",
+   "per_stream": 35.40602074767621,
+   "aggregate": 107.17565606779075,
+   "ttft": 1.0701354379416443,
+   "tokens_mean": 256.0,
+   "runs": 2
+  },
+  {
+   "concurrency": 3,
+   "phase": "code",
+   "per_stream": 36.402137614141395,
+   "aggregate": 117.98653416434682,
+   "ttft": 1.517812687496189,
+   "tokens_mean": 256.0,
+   "runs": 2
+  },
+  {
+   "concurrency": 3,
+   "phase": "structured",
+   "per_stream": 32.96168926641594,
+   "aggregate": 101.92117772936496,
+   "ttft": 1.1267154375091195,
+   "tokens_mean": 167.66666666666666,
+   "runs": 2
+  },
+  {
+   "concurrency": 3,
+   "phase": "list",
+   "per_stream": 39.50950632595394,
+   "aggregate": 122.86578638596504,
+   "ttft": 0.5360901040257886,
+   "tokens_mean": 227.66666666666666,
+   "runs": 2
+  }
+ ]
+}

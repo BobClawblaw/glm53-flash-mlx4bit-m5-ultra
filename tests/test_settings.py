@@ -21,7 +21,7 @@ class Defaults(unittest.TestCase):
         self.assertEqual(s.profile, "chat")
         self.assertTrue(s.drafts)
         self.assertEqual(s.context, 262144)
-        self.assertEqual(s.parallel, 1)
+        self.assertEqual(s.parallel, 3)
         self.assertEqual(s.url, "http://127.0.0.1:8888")  # not 8080: everything else on this Mac uses it
         args = s.serve_args("/m")
         self.assertEqual(args[:2], ["serve", "/m"])
@@ -44,7 +44,7 @@ class Defaults(unittest.TestCase):
 
     def test_long_profile_is_the_full_window(self):
         s = load(profile="long")
-        self.assertEqual((s.context, s.memory_limit_gb), (1048576, 215))
+        self.assertEqual((s.context, s.memory_limit_gb, s.parallel), (1048576, 215, 1))
         self.assertTrue(s.drafts)
         self.assertEqual(load(profile="long", context="524288").context, 524288)  # an explicit context still wins
 
@@ -65,7 +65,7 @@ class Defaults(unittest.TestCase):
         self.assertEqual(args[args.index("--parallel") + 1], "4")
         self.assertIn("--learn", args)
         self.assertTrue(args[args.index("--learn-dir") + 1].endswith("/l"))
-        self.assertIn("limit=200GB", s.summary())
+        self.assertIn("limit=210GB", s.summary())
 
     def test_server_env_carries_the_load_limit(self):
         s = load(extra_env="TF_X=1 TF_Y=a=b", request_log="~/req.log", memory_limit_gb="190")
