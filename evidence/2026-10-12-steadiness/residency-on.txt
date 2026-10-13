@@ -1,0 +1,15 @@
+## ruler 1 and 2 users
+  c=1   prose         28.3 /    28.3 tok/s   ttft 0.14s   224 tokens a reply
+  c=1   code          38.6 /    38.6 tok/s   ttft 0.16s   256 tokens a reply
+  c=1   structured    98.5 /    98.5 tok/s   ttft 0.15s   170 tokens a reply
+  c=1   list          96.7 /    96.7 tok/s   ttft 0.11s   81 tokens a reply
+  c=2   prose         55.7 /   111.4 tok/s   ttft 0.22s   240 tokens a reply
+  c=2   code          54.9 /   109.7 tok/s   ttft 0.25s   256 tokens a reply
+  c=2   structured    60.4 /   120.8 tok/s   ttft 0.24s   168 tokens a reply
+  c=2   list          59.2 /   118.5 tok/s   ttft 0.75s   168 tokens a reply
+## 30 mixed, thinking off
+104 44 53 64 42 104 47 104 94 47 71 45 105 96 86 70 59 17 97 85 101 60 97 97 85 101 79 98 68 37
+replies under 85% of the same prompt's best: 11 of 30 [2, 3, 4, 9, 10, 15, 16, 17, 21, 28, 29]
+## 30 mixed, again
+
+[exited with code 143]

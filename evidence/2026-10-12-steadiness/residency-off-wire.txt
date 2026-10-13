@@ -1,0 +1,33 @@
+parallel=2
+residency=0
+[18:13:11] stopped
+## start (no residency set, GLM_WIRE on)
+[18:13:19] Waiting for http://0.0.0.0:8888/v1/models (log: /Users/xian/.cache/tensorfold-glm53/server.log)
+[18:13:41] Ready in 22s: http://0.0.0.0:8888/v1 serves GLM-5.3-Flash-MLX-4bit
+GLM_LOAD_LIMIT_GB=215 GLM_WIRE=1 
+## 30 mixed
+105 77 104 97 87 106 77 104 97 87 106 77 105 99 86 103 80 107 99 86 99 80 107 100 86 99 80 107 100 86
+replies under 85% of the same prompt's best: 0 of 30 []
+## 30 mixed, again
+106 76 105 97 87 106 77 105 97 87 106 76 105 97 87 103 80 107 99 87 103 80 107 98 87 103 80 107 97 86
+replies under 85% of the same prompt's best: 0 of 30 []
+## ruler 1 and 2 users
+  c=1   prose         93.6 /    93.6 tok/s   ttft 0.13s   224 tokens a reply
+  c=1   code         105.2 /   105.2 tok/s   ttft 0.15s   256 tokens a reply
+  c=1   structured   100.0 /   100.0 tok/s   ttft 0.15s   170 tokens a reply
+  c=1   list          96.9 /    96.9 tok/s   ttft 0.11s   81 tokens a reply
+  c=2   prose         57.5 /   115.0 tok/s   ttft 0.19s   240 tokens a reply
+  c=2   code          62.3 /   124.7 tok/s   ttft 0.21s   256 tokens a reply
+  c=2   structured    61.3 /   122.6 tok/s   ttft 0.23s   168 tokens a reply
+  c=2   list          69.9 /   139.8 tok/s   ttft 0.18s   168 tokens a reply
+## idle
+after 10 s idle: first token 1.09 s, 1.06 s, 1.10 s
+after 30 s idle: first token 1.03 s, 1.04 s, 1.03 s
+min free+inactive GiB: 49.6
+max wired GiB: 202.8
+samples with ComfyUI above 5% CPU: 0
+## stop GLM, restore Qwen
+[18:19:13] stopped
+RESTORED
+
+[exited with code 0]

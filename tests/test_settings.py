@@ -35,8 +35,9 @@ class Defaults(unittest.TestCase):
         self.assertEqual(load(reasoning_effort="max").serve_args("/m")[-1:], load(reasoning_effort="max").serve_args("/m")[-1:])
         self.assertIn("xhigh", load(reasoning_effort="max").serve_args("/m"))
         self.assertNotIn("--reasoning-effort", load(reasoning_effort="").serve_args("/m"))
-        self.assertEqual(s.server_env()["GLM_RESIDENCY"], "1")
-        self.assertEqual(s.server_env()["GLM_WIRE"], "1")
+        self.assertNotIn("GLM_RESIDENCY", s.server_env())   # no residency set: its weights-only set made replies slow
+        self.assertEqual(s.server_env()["GLM_WIRE"], "1")   # the model still wired, through extra_env
+        self.assertEqual(load(residency="1").server_env()["GLM_RESIDENCY"], "1")
         self.assertEqual(args[args.index("--vision-image-tokens") + 1], "4096")
         self.assertIn("--vision", args)
         self.assertNotIn("--vision", load(vision="0").serve_args("/m"))

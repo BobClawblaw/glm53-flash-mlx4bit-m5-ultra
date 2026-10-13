@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-12 (steadiness)
+
+- `residency = false` and `extra_env = "GLM_WIRE=1"` by default: the model stays wired with no residency set. The
+  weights-only set made 11-14 of 30 mixed replies slow (two streams); without it 0 of 60, the ruler 94 / 105 / 100 /
+  97 tok/s, the first token after idle ~1 s (0.13 s with the set). README: Steadiness.
+
 ## 2026-10-10
 
 - **Long prompts and images remeasured on 1.0.5.** Needles found at 484,587 tokens in 293 s (1,656 tok/s; 880 s on

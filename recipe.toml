@@ -67,12 +67,12 @@ vision_image_tokens = 4096       # the visual tokens a request's images share (e
 vision_max_images = 4
 api_key = ""
 extra_args = ""
-extra_env = ""
+extra_env = "GLM_WIRE=1"         # the model wired (mlock) before its reads, with no residency set (README, Steadiness)
 # memory: the engine refuses a one-Mac load past GLM_LOAD_LIMIT_GB (stock 1.0.5; unset: 70% of RAM). 215 GB holds
 # the 180.6 GB of weights, the 1M-token pool, three streams' own states and the kept prompt states; `up` also refuses when free memory is under the
 # engine's floor plus memory_margin_gib, and the watchdog below kills the server before the Mac swaps.
 memory_limit_gb = 215
-residency = true                 # GLM_RESIDENCY and GLM_WIRE: the model resident and wired before its reads
+residency = false                # GLM_RESIDENCY and GLM_WIRE; off: its weights-only set made 11-14 of 30 replies slow (README)
 memory_margin_gib = 8
 memguard = true
 memguard_min_free_gib = 6        # free + inactive + speculative pages

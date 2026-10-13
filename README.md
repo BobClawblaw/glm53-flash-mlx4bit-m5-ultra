@@ -69,8 +69,8 @@ decodes at 73 tok/s and drafted at 91, on the suite's `drafts` prompts. On 1.0.4
 does not show that. Two early ruler runs on 1.0.5 each had one slow phase (structured 61, then list 42) with the
 same tokens and the same draft rounds, and a third run later did the same (list 42). 22 ruler runs and 24 single
 requests with the engine's per-round timing on never repeated it: decode is GPU-bound (~94% of the wall time), and
-neither the time since load nor other GPU work explains it. The cause is open
-([`evidence/2026-10-10-slow-phase/`](evidence/2026-10-10-slow-phase/)).
+neither the time since load nor other GPU work explains it. The cause was the residency set, now off
+([`evidence/2026-10-10-slow-phase/`](evidence/2026-10-10-slow-phase/); see Steadiness).
 
 Concurrent requests share the engine's decode rounds, so a request that arrives during another's long reply starts
 at once instead of queueing behind it. They share the throughput rather than add to it: one stream's rounds already
@@ -147,6 +147,24 @@ The pool was checked on 1.0.5 ([`evidence/2026-10-10-pool-1.0.5/`](evidence/2026
   reads its prompt once more before the cache keeps it again.
 
 The tower is 0.9 GiB, plus 1.2 GiB of scratch for 4,096 image tokens.
+
+## Steadiness
+
+`residency = false` with `extra_env = "GLM_WIRE=1"` (the defaults since 2026-10-12): every buffer stays wired (mlock),
+but there is no residency set. With 1.0.5's set, which holds the weights and the buffers present at load, replies that
+touched both held and unheld buffers ran slower with the same tokens and draft rounds: 11-14 of 30 mixed single
+replies under 85% of their prompt's speed (some at 5-17 tok/s), the ruler 28-99 tok/s on one user. That is the
+"slow phase" above. Two streams, the M5 Ultra, an idle ComfyUI beside it:
+
+| | Slow replies (30 mixed, 5 prompts) | Ruler, 1 user (prose / code / structured / list) | 2 users, in all | First token after 10-30 s idle |
+|---|---|---|---|---|
+| `residency = true` | 11-14 of 30 | 28-63 / 39-71 / 60-99 / 41-97 | 90-121 | 0.13 s |
+| `residency = false`, `GLM_WIRE=1` | 0 of 60 | 94 / 105 / 100 / 97 | 115-140 | 1.05 s |
+
+Without a set the GPU re-establishes the model's residency after a pause, about 1 s on the first token. A patch that
+holds every buffer (each later one joining between requests), makes the idle keepalive's tick real work (1.0.5's tick
+is an empty command buffer, which never reaches the GPU) and commits the set when a lone request starts measured
+0.10-0.11 s after idle with 2 of 60 replies slow; it is not in this recipe yet.
 
 ## Quality
 
@@ -274,7 +292,7 @@ an environment variable of the same name in upper case (`PORT=8890 python3 -m ma
 | `prompt_cache_gib` | 4 | kept prompt states, bounded so the load stays predictable |
 | `vision`, `vision_image_tokens`, `vision_max_images` | true, 4096, 4 | see Images |
 | `memory_limit_gb` | 215 | `GLM_LOAD_LIMIT_GB`, 1.0.5's one-Mac load limit (unset: 70% of RAM). Past 70% the server logs the watchdog-panic risk |
-| `residency` | true | `GLM_RESIDENCY` + `GLM_WIRE`: resident and wired before the reads. Keep it on |
+| `residency` | false | `GLM_RESIDENCY` + `GLM_WIRE`; off by default, with `extra_env = "GLM_WIRE=1"` keeping the wiring (Steadiness) |
 | `memguard*` | 6 GiB free, 12 GiB swap growth, 24 GiB compressor growth | SIGKILL after two readings 2 s apart; 30 s at critical pressure |
 | `memory_margin_gib` | 8 | `up` refuses with less free than the engine's floor plus this |
 | `keep_warm`, `dashboard`, `learn*`, `compact_at` | 900, true, false | the engine's flags |
