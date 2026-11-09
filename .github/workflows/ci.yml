@@ -22,15 +22,15 @@ jobs:
         run: python3 -m unittest discover -s tests -q
       - name: settings dry runs
         run: |
-          python3 -m mac validate | grep -q "temp=0 .*vision=4096 .*residency=1 memguard=1"
+          python3 -m mac validate | grep -q "temp=checkpoint .*vision=0 .*residency=1 wired_limit=225000MB memguard=1 engine=build@8be9c408 "
           python3 -m mac validate | grep -q "url=http://127.0.0.1:8888"
           PROFILE=reference python3 -m mac validate | grep -q "drafts=0"
-          VISION=0 python3 -m mac validate | grep -q "vision=0"
+          TEMPERATURE=0 python3 -m mac validate | grep -q "temp=0 "
       - name: refusals
         run: |
-          for bad in "TEMPERATURE=0.7" "CONTEXT=1000" "PARALLEL=0" "VISION_IMAGE_TOKENS=8" "EXTRA_ARGS=--vision-urls" \
+          for bad in "VISION=1" "CONTEXT=1000" "PARALLEL=0" "TEMPERATURE=hot" "EXTRA_ARGS=--vision" "EXTRA_ARGS=--vision-urls" \
                      "EXTRA_ENV=GLM_RESIDENCY=0" "PATCH_SHA256=$(printf 'b%.0s' {1..64})"; do
             if env $bad python3 -m mac validate >/dev/null 2>&1; then echo "accepted: $bad"; exit 1; fi
           done
-      - name: the pinned patch matches its sha256
-        run: python3 -c "import hashlib,tomllib;r=tomllib.load(open('recipe.toml','rb'))['engine'];assert hashlib.sha256(open('patches/'+r['patch'],'rb').read()).hexdigest()==r['patch_sha256']"
+      - name: the release is pinned unpatched
+        run: python3 -c "import tomllib;r=tomllib.load(open('recipe.toml','rb'))['engine'];assert r['patch']=='' and r['patch_sha256']=='' and len(r['tensorfold_sha'])==40"

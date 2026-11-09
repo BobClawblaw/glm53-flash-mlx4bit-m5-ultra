@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
-from pathlib import Path
 
 from . import config, engine, external, memguard, serve, weights
 from .log import fail
@@ -22,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status", help="pid, memory, /health, /v1/models")
     lg = sub.add_parser("logs", help="the server log's tail")
     lg.add_argument("--tail", type=int, default=80)
-    b = sub.add_parser("build", help="worktree at the pinned sha, the patch, zig build native")
+    b = sub.add_parser("build", help="worktree at the pinned sha, the patch if one is pinned, zig build native")
     b.add_argument("--rebuild", action="store_true")
     sub.add_parser("pull", help="download the checkpoint at the pinned revision unless a copy is cached")
     sub.add_parser("info", help="the engine's view of the checkpoint: family, format, memory floor")
@@ -31,11 +30,6 @@ def main(argv: list[str] | None = None) -> int:
     ch.add_argument("prompt", nargs="?", default="Say hello in one sentence.")
     ch.add_argument("--max-tokens", type=int, default=128)
     ch.add_argument("--no-draft", action="store_true", help='send "draft": false (the plain reference)')
-    see = sub.add_parser("see", help="one greedy reply about images from the running server (vision = true)")
-    see.add_argument("images", nargs="+", type=Path, help="image files, then the question (default: describe them)")
-    see.add_argument("--prompt", default="Describe this image in two sentences.")
-    see.add_argument("--max-tokens", type=int, default=160)
-    see.add_argument("--detail", choices=("auto", "low", "high"), default="auto")
     mg = sub.add_parser("memguard", help="(internal) watch a pid and kill it before the Mac swaps")
     mg.add_argument("pid", type=int)
     mg.add_argument("min_free_gib", type=float)
@@ -80,11 +74,6 @@ def main(argv: list[str] | None = None) -> int:
             print(" ".join(cmd))
         elif a.cmd == "chat":
             print(serve.chat(s, a.prompt, a.max_tokens, draft=False if a.no_draft else None))
-        elif a.cmd == "see":
-            missing = [str(p) for p in a.images if not p.is_file()]
-            if missing:
-                raise RuntimeError(f"no such image: {', '.join(missing)}")
-            print(serve.chat(s, a.prompt, a.max_tokens, images=a.images, detail=a.detail))
         elif a.cmd == "suite":
             return external.suite(s, [w for w in a.rest if w != "--"])
         elif a.cmd == "quality":

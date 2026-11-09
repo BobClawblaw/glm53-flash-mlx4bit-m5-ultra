@@ -2,7 +2,7 @@
 
 Unified memory has no GPU meter. Three signals kill after two readings in a row (4 s): free, inactive and speculative
 pages under the floor; swap grown past a ceiling since the guard started; the compressor grown past a ceiling. The
-model is wired (GLM_WIRE), so none of it can compress: compressor growth is other memory being squeezed, the path
+model is wired (the engine's residency set, with the GPU wired ceiling raised), so none of it can compress: compressor growth is other memory being squeezed, the path
 that ended one unwired load in jetsam killing ~300 system daemons (145 GiB compressed, low swap). macOS's pressure
 level at critical (kern.memorystatus_vm_pressure_level 4) kills only after CRITICAL_SECONDS, since a load shows it
 for a reading or two while the kernel evicts file cache. Swap *free* is no signal: the swap file grows on demand.

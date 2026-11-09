@@ -1,6 +1,6 @@
 """Each request's decode rate beside its rounds from the server's GLM_WINDOWS log: where a slow phase's time goes.
 
-Serve with `extra_env = "GLM_WINDOWS=1"` (local.toml [engine]), then: python3 -I tools/slowhunt.py [repeats]
+Serve with `extra_env = "GLM_WINDOWS=1"` (local.toml [serve]), then: python3 -I tools/slowhunt.py [repeats]
 """
 import json, os, re, statistics, sys, time, urllib.request
 LOG = os.path.expanduser("~/.cache/tensorfold-glm53/server.log")  # the recipe's server log; serve with GLM_WINDOWS=1

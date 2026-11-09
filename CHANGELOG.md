@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-09 (TensorFold 1.2.5, no patch)
+
+- **TensorFold 1.2.5 as released** (`8be9c408`), no patch. The 1.0.5 line's patch is not carried: 1.2.5 pools the
+  window for its streams (`--context 1048576 --parallel 3` loads 190.9 GiB wired), keeps the model in a residency set
+  (`GLM_RESIDENCY`), and serves sampled requests (the default is the checkpoint's temperature 1.0, top_p 0.95;
+  `temperature = "0"` makes the server greedy by default). `GLM_LOAD_LIMIT_GB=215` is still needed: the release's 70%
+  limit (179.2 GB) drops the MTP head.
+- **The GPU wired ceiling is a requirement.** At macOS's default `iogpu.wired_limit_mb` (0, about 75% of RAM) the wired
+  collector evicts parts of the model mid-request (181 to 85 GiB wired, no restart) and the same greedy reply ran at
+  7 to 107 tok/s. `up` refuses under `wired_limit_mb` (225000) and prints `sudo sysctl iogpu.wired_limit_mb=225000`
+  (it resets at reboot). With it, greedy code replies run at 107 tok/s within 0.4 across five repeats.
+- **Gone with the patch:** image input (1.2.5 has no `--vision` for GLM on Metal; an `image_url` part answers 400; the
+  `see` command, the test images and the vision tools are removed), and the greedy fallback (not needed: sampling
+  works). Structured output and `tool_choice` required/named still answer 400: the Metal GLM backend has no token
+  grammar support in 1.2.5.
+- **Measured on 1.2.5** (the recipe harness, `evidence/2026-11-09-1.2.5/`): see the README's tables. The quality suite
+  was not run on this build; the 1.0.5 line's results stay in `evidence/2026-10-10-*` as that line's.
+- **tensorfold.dev/benchmarks:** community-v1 from the same build with the board-suite port (`--suite community-v1`):
+  code 119.2 / chat 83.1 tok/s sampled, 107.1 / 88.1 greedy, first text 76 / 114 ms.
+
 ## 2026-10-12 (steadiness)
 
 - `residency = false` and `extra_env = "GLM_WIRE=1"` by default: the model stays wired with no residency set. The

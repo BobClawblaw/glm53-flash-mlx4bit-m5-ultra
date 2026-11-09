@@ -1,0 +1,538 @@
+{
+ "json_object/greedy": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Describe a cat as JSON with a few fields.",
+  "request": {
+   "max_tokens": 160,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "response_format": {
+    "type": "json_object"
+   },
+   "temperature": 0
+  },
+  "plain_text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "plain_seconds": 0.0,
+  "plain_usage": null
+ },
+ "json_object/sampled": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Describe a cat as JSON with a few fields.",
+  "request": {
+   "max_tokens": 160,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "response_format": {
+    "type": "json_object"
+   },
+   "temperature": 0.8,
+   "top_k": 20,
+   "top_p": 0.95,
+   "seed": 3
+  },
+  "plain_text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "plain_seconds": 0.0,
+  "plain_usage": null
+ },
+ "json_object/thinking": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Describe a cat as JSON with a few fields.",
+  "request": {
+   "max_tokens": 400,
+   "chat_template_kwargs": {
+    "enable_thinking": true
+   },
+   "response_format": {
+    "type": "json_object"
+   },
+   "temperature": 0
+  }
+ },
+ "json_schema/greedy": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Invent a person.",
+  "request": {
+   "max_tokens": 160,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+     "name": "p",
+     "schema": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "age": {
+        "type": "integer"
+       },
+       "hobbies": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 3
+       }
+      },
+      "required": [
+       "name",
+       "age",
+       "hobbies"
+      ],
+      "additionalProperties": false
+     }
+    }
+   },
+   "temperature": 0
+  },
+  "plain_text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "plain_seconds": 0.0,
+  "plain_usage": null
+ },
+ "json_schema/sampled": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Invent a person.",
+  "request": {
+   "max_tokens": 160,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+     "name": "p",
+     "schema": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "age": {
+        "type": "integer"
+       },
+       "hobbies": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 3
+       }
+      },
+      "required": [
+       "name",
+       "age",
+       "hobbies"
+      ],
+      "additionalProperties": false
+     }
+    }
+   },
+   "temperature": 0.8,
+   "top_k": 20,
+   "top_p": 0.95,
+   "seed": 3
+  },
+  "plain_text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "plain_seconds": 0.0,
+  "plain_usage": null
+ },
+ "json_schema/thinking": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Invent a person.",
+  "request": {
+   "max_tokens": 400,
+   "chat_template_kwargs": {
+    "enable_thinking": true
+   },
+   "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+     "name": "p",
+     "schema": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "age": {
+        "type": "integer"
+       },
+       "hobbies": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 3
+       }
+      },
+      "required": [
+       "name",
+       "age",
+       "hobbies"
+      ],
+      "additionalProperties": false
+     }
+    }
+   },
+   "temperature": 0
+  }
+ },
+ "guided_json/greedy": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Invent a person who likes the sea.",
+  "request": {
+   "max_tokens": 160,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "guided_json": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string"
+     },
+     "age": {
+      "type": "integer"
+     },
+     "hobbies": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 3
+     }
+    },
+    "required": [
+     "name",
+     "age",
+     "hobbies"
+    ],
+    "additionalProperties": false
+   },
+   "temperature": 0
+  },
+  "plain_text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "plain_seconds": 0.0,
+  "plain_usage": null
+ },
+ "guided_json/sampled": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Invent a person who likes the sea.",
+  "request": {
+   "max_tokens": 160,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "guided_json": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string"
+     },
+     "age": {
+      "type": "integer"
+     },
+     "hobbies": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 3
+     }
+    },
+    "required": [
+     "name",
+     "age",
+     "hobbies"
+    ],
+    "additionalProperties": false
+   },
+   "temperature": 0.8,
+   "top_k": 20,
+   "top_p": 0.95,
+   "seed": 3
+  },
+  "plain_text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "plain_seconds": 0.0,
+  "plain_usage": null
+ },
+ "guided_json/thinking": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Invent a person who likes the sea.",
+  "request": {
+   "max_tokens": 400,
+   "chat_template_kwargs": {
+    "enable_thinking": true
+   },
+   "guided_json": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string"
+     },
+     "age": {
+      "type": "integer"
+     },
+     "hobbies": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 3
+     }
+    },
+    "required": [
+     "name",
+     "age",
+     "hobbies"
+    ],
+    "additionalProperties": false
+   },
+   "temperature": 0
+  }
+ },
+ "regex/greedy": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Give me a US phone number.",
+  "request": {
+   "max_tokens": 160,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "guided_regex": "\\(\\d{3}\\) \\d{3}-\\d{4}",
+   "temperature": 0
+  },
+  "plain_text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "plain_seconds": 0.0,
+  "plain_usage": null
+ },
+ "regex/sampled": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Give me a US phone number.",
+  "request": {
+   "max_tokens": 160,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "guided_regex": "\\(\\d{3}\\) \\d{3}-\\d{4}",
+   "temperature": 0.8,
+   "top_k": 20,
+   "top_p": 0.95,
+   "seed": 3
+  },
+  "plain_text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "plain_seconds": 0.0,
+  "plain_usage": null
+ },
+ "regex/thinking": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Give me a US phone number.",
+  "request": {
+   "max_tokens": 400,
+   "chat_template_kwargs": {
+    "enable_thinking": true
+   },
+   "guided_regex": "\\(\\d{3}\\) \\d{3}-\\d{4}",
+   "temperature": 0
+  }
+ },
+ "choice/greedy": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Is the sky green? Answer.",
+  "request": {
+   "max_tokens": 160,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "guided_choice": [
+    "yes",
+    "no",
+    "it depends"
+   ],
+   "temperature": 0
+  },
+  "plain_text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "plain_seconds": 0.0,
+  "plain_usage": null
+ },
+ "choice/sampled": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Is the sky green? Answer.",
+  "request": {
+   "max_tokens": 160,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "guided_choice": [
+    "yes",
+    "no",
+    "it depends"
+   ],
+   "temperature": 0.8,
+   "top_k": 20,
+   "top_p": 0.95,
+   "seed": 3
+  },
+  "plain_text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "plain_seconds": 0.0,
+  "plain_usage": null
+ },
+ "choice/thinking": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Is the sky green? Answer.",
+  "request": {
+   "max_tokens": 400,
+   "chat_template_kwargs": {
+    "enable_thinking": true
+   },
+   "guided_choice": [
+    "yes",
+    "no",
+    "it depends"
+   ],
+   "temperature": 0
+  }
+ },
+ "grammar/greedy": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Count to five.",
+  "request": {
+   "max_tokens": 160,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "guided_grammar": "root ::= num (\", \" num)*\nnum ::= [1-9]",
+   "temperature": 0
+  },
+  "plain_text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "plain_seconds": 0.0,
+  "plain_usage": null
+ },
+ "grammar/sampled": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Count to five.",
+  "request": {
+   "max_tokens": 160,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "guided_grammar": "root ::= num (\", \" num)*\nnum ::= [1-9]",
+   "temperature": 0.8,
+   "top_k": 20,
+   "top_p": 0.95,
+   "seed": 3
+  },
+  "plain_text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "plain_seconds": 0.0,
+  "plain_usage": null
+ },
+ "grammar/thinking": {
+  "text": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}",
+  "finish": null,
+  "ok": false,
+  "status": 400,
+  "usage": null,
+  "seconds": 0.0,
+  "prompt": "Count to five.",
+  "request": {
+   "max_tokens": 400,
+   "chat_template_kwargs": {
+    "enable_thinking": true
+   },
+   "guided_grammar": "root ::= num (\", \" num)*\nnum ::= [1-9]",
+   "temperature": 0
+  }
+ },
+ "bad_regex_status": 400,
+ "bad_regex_error": "{\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}}"
+}

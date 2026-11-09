@@ -1,0 +1,53 @@
+{
+ "target": "glm53-m5",
+ "plan": "prefill",
+ "url": "http://127.0.0.1:8888",
+ "model": "GLM-5.3-Flash-MLX-4bit",
+ "started": "20261109-125104",
+ "status": "done",
+ "checks": [
+  {
+   "name": "memory-idle",
+   "type": "memory",
+   "ok": null,
+   "summary": "mac: ssh: Could not resolve hostname unused: nodename nor servnam",
+   "seconds": 0.0
+  },
+  {
+   "name": "prefill-off",
+   "type": "prefill",
+   "ok": null,
+   "summary": "2216 tokens 1928.6 tok/s (1.149 s), 8746 tokens 1414.8 tok/s (6.182 s), 35125 tokens 1711.7 tok/s (20.521 s), 139815 tokens 1621.0 tok/s (86.253 s)",
+   "seconds": 114.6
+  },
+  {
+   "name": "prefill-thinking",
+   "type": "prefill",
+   "ok": null,
+   "summary": "2233 tokens 1972.6 tok/s (1.132 s), 8767 tokens 1986.2 tok/s (4.414 s), 34950 tokens 1696.4 tok/s (20.603 s), 139894 tokens 1730.9 tok/s (80.822 s)",
+   "seconds": 107.3
+  },
+  {
+   "name": "memory-busy",
+   "type": "memory",
+   "ok": null,
+   "summary": "mac: ssh: Could not resolve hostname unused: nodename nor servnam",
+   "seconds": 0.0
+  }
+ ],
+ "identity": {
+  "engine_commit": {
+   "value": "7070b25ca",
+   "exit": 0
+  },
+  "binary_sha256": {
+   "value": "351fb8c93fee1f096435e85890f21c6a0a9328d7b6623c6d8f52542a6fac12ad",
+   "exit": 0
+  },
+  "suite_commit": {
+   "value": "206803ca7135",
+   "exit": 0
+  }
+ },
+ "finished": "20261109-125446"
+}

@@ -1,0 +1,84 @@
+{
+ "target": "glm53-m5",
+ "plan": "quick",
+ "url": "http://127.0.0.1:8888",
+ "model": "GLM-5.3-Flash-MLX-4bit",
+ "started": "20261109-122358",
+ "status": "done",
+ "checks": [
+  {
+   "name": "memory-idle",
+   "type": "memory",
+   "ok": null,
+   "summary": "mac: ssh: Could not resolve hostname unused: nodename nor servnam",
+   "seconds": 0.0
+  },
+  {
+   "name": "ruler-fresh",
+   "type": "ruler",
+   "ok": null,
+   "summary": "c=1 89.7/62.9/96.6/92.8 ttft 0.11-0.14s",
+   "seconds": 28.9
+  },
+  {
+   "name": "structured",
+   "skipped": true,
+   "why": "features.structured = false; the server refuses json_schema (400: {\"error\": {\"message\": \"structured output (response_format and the guided_* fields) is not supported by this engine yet\", \"type\": \"invalid_request_error\"}})"
+  },
+  {
+   "name": "tools",
+   "type": "tools",
+   "ok": true,
+   "summary": "1/1 tool cases right; not tested (features.structured = false): required, named, named/thinking, named/stream",
+   "seconds": 0.9
+  },
+  {
+   "name": "sampling",
+   "type": "sampling",
+   "ok": true,
+   "summary": "9/9 seeded replies equal on repeat and undrafted; 0 errors",
+   "seconds": 49.6
+  },
+  {
+   "name": "turns",
+   "type": "turns",
+   "ok": null,
+   "summary": "resumed == again: True; cold (padded) not compared: 4777 prompt tokens (cached 0) against 4776; cached 4652 of 4776; ttft resumed 0.196s, cold 3.945s",
+   "seconds": 12.3
+  },
+  {
+   "name": "urls",
+   "skipped": true,
+   "why": "features.vision_urls = false"
+  },
+  {
+   "name": "ruler-after",
+   "type": "ruler",
+   "ok": null,
+   "summary": "c=1 89.7/101.7/95.7/93.6 ttft 0.11-0.14s",
+   "seconds": 27.6
+  },
+  {
+   "name": "suite",
+   "type": "suite",
+   "ok": null,
+   "summary": "soak 60/60, drafts 12/12, concurrent 12/12, streaming 4/4, multiturn 8/8, stop 3/3, thinking 10/10, copy 2/2, max-tokens 3/3",
+   "seconds": 893.7
+  }
+ ],
+ "identity": {
+  "engine_commit": {
+   "value": "7070b25ca",
+   "exit": 0
+  },
+  "binary_sha256": {
+   "value": "351fb8c93fee1f096435e85890f21c6a0a9328d7b6623c6d8f52542a6fac12ad",
+   "exit": 0
+  },
+  "suite_commit": {
+   "value": "206803ca7135",
+   "exit": 0
+  }
+ },
+ "finished": "20261109-124052"
+}

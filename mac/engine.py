@@ -1,4 +1,4 @@
-"""The engine binary: a worktree of TensorFold at the pinned sha under tf_cache, the recipe's patch applied, built with Zig."""
+"""The engine binary: a worktree of TensorFold at the pinned sha under tf_cache, the recipe's patch (if any) applied, built with Zig."""
 
 from __future__ import annotations
 
@@ -41,8 +41,13 @@ def ensure_source(s: Settings) -> Path:
 
 
 def ensure_patched(s: Settings, src: Path) -> bool:
-    """The pinned patch applied to the worktree, once; a worktree carrying any other change is refused. True if just applied."""
+    """The pinned patch applied to the worktree, once; a worktree carrying any other change is refused. True if just applied.
+    With no patch pinned the worktree must be the release as checked out."""
     marker = src / ".recipe-patch"
+    if not s.patch:
+        if marker.is_file() or subprocess.run(["git", "-C", str(src), "diff", "--quiet"], capture_output=True).returncode:
+            raise RuntimeError(f"{src} carries changes, but the recipe pins the release unpatched; remove the worktree to rebuild it")
+        return False
     if marker.is_file() and marker.read_text().strip() == s.patch_sha256:
         if subprocess.run(["git", "-C", str(src), "apply", "--check", "--reverse", str(s.patch_path)], capture_output=True).returncode:
             raise RuntimeError(f"{src} carries changes beyond the pinned patch; remove the worktree to rebuild it")
@@ -57,7 +62,7 @@ def ensure_patched(s: Settings, src: Path) -> bool:
 
 
 def ensure_binary(s: Settings, rebuild: bool = False) -> Path:
-    """The binary to serve with: `binary` as given, or the pinned sha plus patch built once (zig build native)."""
+    """The binary to serve with: `binary` as given, or the pinned sha (plus the patch, if any) built once (zig build native)."""
     if s.binary:
         return s.run_binary
     src = ensure_source(s)
@@ -71,7 +76,7 @@ def ensure_binary(s: Settings, rebuild: bool = False) -> Path:
     have = _run([str(s.zig), "version"]).strip()
     if have != want:
         raise RuntimeError(f"{s.zig} is Zig {have}; the checkout pins {want}")
-    log(f"Building tensorfold-native at {s.tensorfold_sha[:8]}+patch (zig build native -Dcpu={s.zig_cpu}); about a minute")
+    log(f"Building tensorfold-native at {s.tensorfold_sha[:8]}{'+patch' if s.patch else ''} (zig build native -Dcpu={s.zig_cpu}); about a minute")
     _run([str(s.zig), "build", "native", f"-Dcpu={s.zig_cpu}"], cwd=src, timeout=3600)
     if not s.built_binary.is_file():
         raise RuntimeError(f"the build left no {s.built_binary}")

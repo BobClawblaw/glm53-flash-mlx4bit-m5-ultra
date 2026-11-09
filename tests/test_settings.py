@@ -30,18 +30,18 @@ class Defaults(unittest.TestCase):
         for flag in ("--no-drafts", "--learn", "--speed-up"):
             self.assertNotIn(flag, args)
         self.assertEqual(args[args.index("--prompt-cache-gib") + 1], "4")
-        self.assertEqual(args[args.index("--temperature") + 1], "0")        # the native GLM engine is greedy-only
+        self.assertNotIn("--temperature", args)                           # the checkpoint's sampling (1.0, top_p 0.95)
+        self.assertIn("0", load(temperature="0").serve_args("/m"))
         self.assertEqual(args[args.index("--reasoning-effort") + 1], "high")
         self.assertEqual(load(reasoning_effort="max").serve_args("/m")[-1:], load(reasoning_effort="max").serve_args("/m")[-1:])
         self.assertIn("xhigh", load(reasoning_effort="max").serve_args("/m"))
         self.assertNotIn("--reasoning-effort", load(reasoning_effort="").serve_args("/m"))
-        self.assertNotIn("GLM_RESIDENCY", s.server_env())   # no residency set: its weights-only set made replies slow
-        self.assertEqual(s.server_env()["GLM_WIRE"], "1")   # the model still wired, through extra_env
-        self.assertEqual(load(residency="1").server_env()["GLM_RESIDENCY"], "1")
-        self.assertEqual(args[args.index("--vision-image-tokens") + 1], "4096")
-        self.assertIn("--vision", args)
-        self.assertNotIn("--vision", load(vision="0").serve_args("/m"))
-        self.assertNotIn("GLM_RESIDENCY", load(residency="0").server_env())   # bounded, so the load stays predictable
+        self.assertNotIn("GLM_RESIDENCY", s.server_env())   # the engine's residency set, its default
+        self.assertNotIn("GLM_WIRE", s.server_env())        # the 1.0.5 patch's switch: gone
+        self.assertEqual(load(residency="0").server_env()["GLM_RESIDENCY"], "0")
+        self.assertNotIn("--vision", args)                  # 1.2.5 has no --vision for GLM on Metal
+        self.assertEqual(s.wired_limit_mb, 225000)
+        self.assertIn("wired_limit=225000MB", s.summary())
 
     def test_default_is_the_full_window_pooled(self):
         s = load()
@@ -75,10 +75,11 @@ class Defaults(unittest.TestCase):
         self.assertEqual(env["TF_Y"], "a=b")
         self.assertTrue(env["TENSORFOLD_REQUEST_LOG"].endswith("/req.log"))
 
-    def test_patch_is_pinned(self):
+    def test_the_release_is_pinned_unpatched(self):
         s = load()
-        self.assertTrue(s.patch_path.is_file())
-        self.assertEqual(len(s.patch_sha256), 64)
+        self.assertEqual((s.patch, s.patch_sha256), ("", ""))
+        self.assertIsNone(s.patch_path)
+        self.assertEqual(s.summary().split("engine=")[1].split()[0], f"build@{s.tensorfold_sha[:8]}")
 
 
 class Refusals(unittest.TestCase):
@@ -100,16 +101,16 @@ class Refusals(unittest.TestCase):
         self.refuse("passes itself", extra_args="--no-dra")          # a prefix
         self.refuse("passes itself", extra_args="--parallel 4")
         self.refuse("not a GLM-on-one-Mac flag", extra_args="--speed-up r.json")
-        self.refuse("passes itself", extra_args="--vision")  # the recipe owns it: the vision setting
+        self.refuse("not a GLM-on-one-Mac flag", extra_args="--vision")  # no GLM vision on Metal in this engine
 
     def test_memory_settings(self):
         self.refuse("outside", memory_limit_gb="0")
         self.refuse("use memory_limit_gb", extra_env="GLM_LOAD_LIMIT_GB=300")
 
     def test_patch_pin(self):
-        self.refuse("not a sha256", patch_sha256="abc")
-        self.refuse("not the pinned", patch_sha256="0" * 64)
-        self.refuse("is missing", patch="nope.patch")
+        self.refuse("patch is empty", patch_sha256="0" * 64)
+        self.refuse("is missing", patch="nope.patch", patch_sha256="0" * 64)
+        self.refuse("must be a file name", patch="../x.patch", patch_sha256="0" * 64)
 
     def test_binary_must_exist(self):
         self.refuse("is not a file", binary="/nonexistent/tensorfold-native")
@@ -118,13 +119,13 @@ class Refusals(unittest.TestCase):
         self.refuse("40-hex", revision="abc")
         self.refuse("not KEY=VALUE", extra_env="NOEQUALS")
         self.refuse("decimal", temperature="hot")
-        self.refuse("greedily", temperature="0.7")
-        self.refuse("greedily", temperature="")
+        self.assertIn("0.7", load(temperature="0.7").serve_args("/m"))   # 1.2.5 samples
+        self.refuse("no --vision", vision="1")
         self.refuse("reasoning_effort", reasoning_effort="extreme")
         self.refuse("passes itself", extra_args="--reasoning-effort low")
         self.refuse("vision_image_tokens", vision_image_tokens="8")
         self.refuse("vision-urls", extra_args="--vision-urls")
-        self.refuse("passes", extra_args="--vision-max-images 2")
+        self.refuse("not a GLM-on-one-Mac flag", extra_args="--vision-max-images 2")
         self.refuse("fraction", compact_at="2")
         self.refuse("outside", port="70000")
         self.refuse("org/name", repo="nothing")

@@ -1,0 +1,102 @@
+{
+ "turn1": {
+  "status": 200,
+  "text": "Three rivers in Europe are:\n\n1. **Danube** \u2013 flows through Central and Southeastern Europe, passing through or along ten countries including Germany, Austria, Hungary, and Romania.\n2. **Rhine** \u2013 begins in the Swiss",
+  "ttft": 3.868,
+  "ttft_any": 3.868,
+  "usage": {
+   "prompt_tokens": 4662,
+   "completion_tokens": 48,
+   "total_tokens": 4710,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   }
+  },
+  "s": 4.348,
+  "finish": "length",
+  "tool_calls": null
+ },
+ "turn2": {
+  "status": 200,
+  "text": "Of the three, the **Danube** is the longest.\n\n- **Danube:** ~2,850 km (1,770 mi) \u2014 the second-longest river in Europe\n- **Rhine:** ~1,230",
+  "ttft": 0.15,
+  "ttft_any": 0.15,
+  "usage": {
+   "prompt_tokens": 4720,
+   "completion_tokens": 48,
+   "total_tokens": 4768,
+   "prompt_tokens_details": {
+    "cached_tokens": 4652
+   },
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   }
+  },
+  "s": 0.639,
+  "finish": "length",
+  "tool_calls": null
+ },
+ "turn3": {
+  "status": 200,
+  "text": "Of the three, the **Volga** is the shortest.\n\n- **Volga:** ~3,530 km (2,193 mi) \u2014 the longest river in Europe\n\nWait \u2014 I need to correct myself. I only",
+  "ttft": 0.196,
+  "ttft_any": 0.196,
+  "usage": {
+   "prompt_tokens": 4776,
+   "completion_tokens": 48,
+   "total_tokens": 4824,
+   "prompt_tokens_details": {
+    "cached_tokens": 4652
+   },
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   }
+  },
+  "s": 0.726,
+  "finish": "length",
+  "tool_calls": null
+ },
+ "turn3_again": {
+  "status": 200,
+  "text": "Of the three, the **Volga** is the shortest.\n\n- **Volga:** ~3,530 km (2,193 mi) \u2014 the longest river in Europe\n\nWait \u2014 I need to correct myself. I only",
+  "ttft": 1.684,
+  "ttft_any": 1.684,
+  "usage": {
+   "prompt_tokens": 4776,
+   "completion_tokens": 48,
+   "total_tokens": 4824,
+   "prompt_tokens_details": {
+    "cached_tokens": 4652
+   },
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   }
+  },
+  "s": 2.223,
+  "finish": "length",
+  "tool_calls": null
+ },
+ "turn3_cold": {
+  "status": 200,
+  "text": "Of the three, the **Volga** is the shortest.\n\n- **Danube:** ~2,850 km (1,770 mi)\n- **Rhine:** ~1,230 km (765 mi)\n- **Vol",
+  "ttft": 3.945,
+  "ttft_any": 3.945,
+  "usage": {
+   "prompt_tokens": 4777,
+   "completion_tokens": 48,
+   "total_tokens": 4825,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   },
+   "completion_tokens_details": {
+    "reasoning_tokens": 0
+   }
+  },
+  "s": 4.412,
+  "finish": "length",
+  "tool_calls": null
+ }
+}

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import re
@@ -50,6 +49,30 @@ def memory_check(s: Settings, info_text: str) -> None:
     log(f"Memory: {have:.1f} GiB free, floor {floor:.1f} GiB, engine load limit {s.memory_limit_gb} GB")
 
 
+def wired_limit_mb() -> int | None:
+    """macOS's GPU wired ceiling, `sysctl iogpu.wired_limit_mb` (0: the default, about 75% of RAM); None off macOS."""
+    p = subprocess.run(["sysctl", "-n", "iogpu.wired_limit_mb"], capture_output=True, text=True)
+    try:
+        return int(p.stdout.strip()) if p.returncode == 0 else None
+    except ValueError:
+        return None
+
+
+def wired_limit_check(s: Settings) -> None:
+    """Refuse a load under a GPU wired ceiling that would let macOS evict the model mid-request (README, Steadiness)."""
+    if not s.wired_limit_mb:
+        return
+    have = wired_limit_mb()
+    if have is None:
+        raise RuntimeError("sysctl iogpu.wired_limit_mb is not readable: this recipe serves on macOS")
+    if 0 < have < s.wired_limit_mb or have == 0:
+        raise RuntimeError(f"iogpu.wired_limit_mb is {have} ({'the default, about 75% of RAM' if have == 0 else 'under the recipe'}): "
+                           f"macOS would evict parts of the wired model mid-request. Raise it (it resets at reboot):\n"
+                           f"  sudo sysctl iogpu.wired_limit_mb={s.wired_limit_mb}\n"
+                           "or set wired_limit_mb = 0 in local.toml to skip this check")
+    log(f"GPU wired ceiling: iogpu.wired_limit_mb={have} (the recipe asks {s.wired_limit_mb})")
+
+
 def tail_memguard(s: Settings) -> str:
     try:
         return s.memguard_log.read_text().strip().splitlines()[-1]
@@ -79,6 +102,7 @@ def command(s: Settings, download: bool = True) -> tuple[list[str], Path]:
     info_text = engine.info(s, snap)
     log("Engine: " + " ".join(line.strip() for line in info_text.strip().splitlines()))
     memory_check(s, info_text)
+    wired_limit_check(s)
     return [str(binary)] + s.serve_args(snap), snap
 
 
@@ -171,7 +195,8 @@ def down(s: Settings, grace: float = 30) -> None:
 def status(s: Settings) -> str:
     p = pid(s)
     lines = [f"pid: {p or 'not running'}", f"url: {s.url}/v1",
-             f"memory: {memguard.free_gib():.1f} GiB free, {memguard.swap_used_mb():.0f} MB swap used"]
+             f"memory: {memguard.free_gib():.1f} GiB free, {memguard.swap_used_mb():.0f} MB swap used, "
+             f"iogpu.wired_limit_mb {wired_limit_mb()}"]
     health = _get(f"{s.url}/health")
     models = _get(f"{s.url}/v1/models")
     lines.append(f"health: {json.dumps(health) if health is not None else 'no answer'}")
@@ -191,15 +216,9 @@ def tail(s: Settings, n: int) -> str:
     return "\n".join(lines[-n:])
 
 
-def chat(s: Settings, prompt: str, max_tokens: int = 128, draft: bool | None = None,
-         images: list[Path] | None = None, detail: str = "auto") -> str:
-    """One greedy chat completion, the smoke test after `up`; draft=False asks for the plain reference. `images`: sent
-    as data: URLs before the prompt (vision = true), as OpenAI image_url parts."""
-    content: str | list = prompt
-    if images:
-        content = [{"type": "image_url", "image_url": {"url": data_url(p), "detail": detail}} for p in images]
-        content.append({"type": "text", "text": prompt})
-    body = {"model": s.served_name, "messages": [{"role": "user", "content": content}], "max_tokens": max_tokens,
+def chat(s: Settings, prompt: str, max_tokens: int = 128, draft: bool | None = None) -> str:
+    """One greedy chat completion, the smoke test after `up`; draft=False asks for the plain reference."""
+    body = {"model": s.served_name, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens,
             "temperature": 0}
     if draft is not None:
         body["draft"] = draft
@@ -213,9 +232,3 @@ def chat(s: Settings, prompt: str, max_tokens: int = 128, draft: bool | None = N
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"HTTP {exc.code}: {exc.read().decode(errors='replace')}") from None
     return json.dumps(out, indent=1)
-
-
-def data_url(path: Path) -> str:
-    kind = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".gif": "gif", ".webp": "webp", ".heic": "heic"}.get(
-        path.suffix.lower(), "octet-stream")
-    return f"data:image/{kind};base64," + base64.b64encode(path.read_bytes()).decode()

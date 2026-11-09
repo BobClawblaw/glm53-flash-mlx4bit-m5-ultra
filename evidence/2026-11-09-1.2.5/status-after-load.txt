@@ -1,0 +1,6 @@
+pid: 94737
+url: http://0.0.0.0:8888/v1
+memory: 27.6 GiB free, 10871 MB swap used, iogpu.wired_limit_mb 225000
+health: {"status": "ok", "model": "GLM-5.3-Flash-MLX-4bit", "model_ids": ["GLM-5.3-Flash-MLX-4bit"], "max_batch_size": 3, "warming": false, "memory": {"active": 207845017424, "cache": 0, "peak": 207845050192, "limit": 215000000000}, "live": {"connections": 1, "waiting": 0, "decode_tokens_per_second": 0.0, "prefill_tokens_per_second": 0.0}, "version": "1.2.5", "backend": "metal", "device": "Apple M5 Ultra"}
+models: GLM-5.3-Flash-MLX-4bit
+stats: {"running": 1, "waiting": 0, "decode_tokens_per_second": 0.0, "prefill_tokens_per_second": 0.0, "generation_tokens_running": 0, "fill_prompt_tokens": 139815, "fill_tokens_left": 74279, "fill_run": 8972299087879994, "prompt_tokens_total": 768663, "generation_tokens_total": 36372, "mtp_drafted_total": 26018, "mtp_accepted_total": 16541, "decode_rounds_total": 19669, "memory": {"active": 207845033808

@@ -20,11 +20,11 @@ MAX_CONTEXT = 1048576                # the checkpoint's max_position_embeddings
 # takes unambiguous prefixes, so any prefix of these is refused too
 OWNED_FLAGS = ("--host", "--port", "--name", "--context", "--parallel", "--max-tokens", "--thinking", "--no-thinking",
                "--no-drafts", "--no-update-check", "--temperature", "--prompt-cache-gib", "--keep-warm", "--learn",
-               "--learn-dir", "--learn-gib", "--compact-at", "--dashboard", "--api-key", "--vision", "--vision-image-tokens",
-               "--vision-max-images", "--reasoning-effort")
+               "--learn-dir", "--learn-gib", "--compact-at", "--dashboard", "--api-key", "--reasoning-effort")
 # flags the native server has for other families or platforms; refused so a setting is not silently ignored
 UNUSED_FLAGS = ("--speed-up", "--backend", "--device", "--segments", "--kv-dtype", "--tp", "--rank", "--master",
-                "--master-port", "--vision-urls", "--vision-offload", "--tool-system")
+                "--master-port", "--vision", "--vision-image-tokens", "--vision-max-images", "--vision-urls",
+                "--vision-offload", "--tool-system")
 
 
 class ConfigError(ValueError):
@@ -77,6 +77,7 @@ class Settings:
     extra_env: str
     memory_limit_gb: int
     residency: bool
+    wired_limit_mb: int
     memory_margin_gib: float
     memguard: bool
     memguard_min_free_gib: float
@@ -109,8 +110,8 @@ class Settings:
         return Path(self.binary).expanduser() if self.binary else self.built_binary
 
     @property
-    def patch_path(self) -> Path:
-        return ROOT / "patches" / self.patch
+    def patch_path(self) -> Path | None:
+        return ROOT / "patches" / self.patch if self.patch else None
 
     @property
     def state_dir(self) -> Path:
@@ -164,9 +165,6 @@ class Settings:
             args += ["--compact-at", self.compact_at]
         if self.dashboard:
             args.append("--dashboard")
-        if self.vision:
-            args += ["--vision", "--vision-image-tokens", str(self.vision_image_tokens),
-                     "--vision-max-images", str(self.vision_max_images)]
         if self.api_key:
             args += ["--api-key", self.api_key]
         return args + self.extra_args.split()
@@ -175,9 +173,8 @@ class Settings:
         env = dict(os.environ)
         env.update({"HF_HOME": str(self.hf_cache), "HF_HUB_OFFLINE": "1", "TENSORFOLD_NO_UPDATE_CHECK": "1",
                     "GLM_LOAD_LIMIT_GB": str(self.memory_limit_gb)})
-        if self.residency:
-            env["GLM_RESIDENCY"] = "1"
-            env["GLM_WIRE"] = "1"
+        if not self.residency:
+            env["GLM_RESIDENCY"] = "0"
         if self.request_log:
             env["TENSORFOLD_REQUEST_LOG"] = str(Path(self.request_log).expanduser())
         for kv in self.extra_env_pairs:
@@ -186,11 +183,11 @@ class Settings:
         return env
 
     def summary(self) -> str:
-        bin_ = self.binary or f"build@{self.tensorfold_sha[:8]}+{self.patch_sha256[:8]}"
+        bin_ = self.binary or f"build@{self.tensorfold_sha[:8]}" + (f"+{self.patch_sha256[:8]}" if self.patch else "")
         return (f"profile={self.profile} ctx={self.context} parallel={self.parallel} drafts={int(self.drafts)} "
                 f"thinking={int(self.thinking)} effort={self.reasoning_effort or 'max'} temp={self.temperature or 'checkpoint'} prompt_cache={self.prompt_cache_gib} "
-                f"learn={int(self.learn)} vision={self.vision_image_tokens if self.vision else 0} limit={self.memory_limit_gb}GB "
-                f"residency={int(self.residency)} memguard={int(self.memguard)} engine={bin_} "
+                f"learn={int(self.learn)} vision={int(self.vision)} limit={self.memory_limit_gb}GB "
+                f"residency={int(self.residency)} wired_limit={self.wired_limit_mb}MB memguard={int(self.memguard)} engine={bin_} "
                 f"model={self.repo}@{self.revision[:8]} url={self.url}")
 
 
@@ -274,7 +271,7 @@ def load(local_file: Path | str | None = None, env: dict[str, str] | None = None
 def validate(s: Settings) -> None:
     for name, lo, hi in (("port", 1, 65535), ("parallel", 1, 64), ("max_tokens", 1, 1 << 24), ("prompt_cache_gib", -1, 1024),
                          ("learn_gib", 1, 4096), ("keep_warm", 0, 86400), ("memory_limit_gb", 1, 4096),
-                         ("memory_margin_gib", 0, 256), ("memguard_min_free_gib", 0, 256),
+                         ("wired_limit_mb", 0, 1 << 20), ("memory_margin_gib", 0, 256), ("memguard_min_free_gib", 0, 256),
                          ("memguard_max_swap_growth_mb", 0, 1 << 20), ("memguard_max_compressor_growth_gib", 0, 4096),
                          ("vision_image_tokens", 16, 16384), ("vision_max_images", 1, 64)):
         v = getattr(s, name)
@@ -295,23 +292,26 @@ def validate(s: Settings) -> None:
                           "for the template's default (max)")
     if s.temperature and not re.fullmatch(r"[0-9]+(\.[0-9]+)?", s.temperature):
         raise ConfigError(f"temperature={s.temperature!r} must be a decimal such as 0 or 0.7, or empty for the checkpoint's")
-    if not s.temperature or float(s.temperature) != 0:
-        raise ConfigError(f"temperature={s.temperature!r}: the native GLM-5.3-Flash engine decodes greedily only, and refuses "
-                          "every request at any other default (the checkpoint's is 1.0); keep temperature = \"0\"")
+    if s.vision:
+        raise ConfigError("vision=1: TensorFold 1.2.5 has no --vision for GLM on Metal (an image_url part answers 400); "
+                          "the 1.0.5 line's patched tower is not carried")
     if s.compact_at and s.compact_at != "auto" and not re.fullmatch(r"0?\.[0-9]+|1(\.0+)?", s.compact_at):
         raise ConfigError(f"compact_at={s.compact_at!r} must be empty, auto or a fraction in (0, 1]")
     if s.binary and not Path(s.binary).expanduser().is_file():
         raise ConfigError(f"binary={s.binary} is not a file")
-    if not re.fullmatch(r"[A-Za-z0-9._-]+\.patch", s.patch):
-        raise ConfigError(f"patch={s.patch} must be a file name under patches/")
-    if not s.patch_path.is_file():
-        raise ConfigError(f"patches/{s.patch} is missing")
-    if not re.fullmatch(r"[0-9a-f]{64}", s.patch_sha256):
-        raise ConfigError(f"patch_sha256={s.patch_sha256} is not a sha256 (recipe.toml [engine])")
-    have = hashlib.sha256(s.patch_path.read_bytes()).hexdigest()
-    if have != s.patch_sha256:
-        raise ConfigError(f"patches/{s.patch} has sha256 {have}, not the pinned {s.patch_sha256}: never edit a patch in "
-                          "place, write a new one and re-pin")
+    if s.patch:
+        if not re.fullmatch(r"[A-Za-z0-9._-]+\.patch", s.patch):
+            raise ConfigError(f"patch={s.patch} must be a file name under patches/")
+        if not s.patch_path.is_file():
+            raise ConfigError(f"patches/{s.patch} is missing")
+        if not re.fullmatch(r"[0-9a-f]{64}", s.patch_sha256):
+            raise ConfigError(f"patch_sha256={s.patch_sha256} is not a sha256 (recipe.toml [engine])")
+        have = hashlib.sha256(s.patch_path.read_bytes()).hexdigest()
+        if have != s.patch_sha256:
+            raise ConfigError(f"patches/{s.patch} has sha256 {have}, not the pinned {s.patch_sha256}: never edit a patch in "
+                              "place, write a new one and re-pin")
+    elif s.patch_sha256:
+        raise ConfigError("patch_sha256 is set but patch is empty: name the patch under patches/ or clear both")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", s.zig_cpu):
         raise ConfigError(f"zig_cpu={s.zig_cpu!r} is not a Zig cpu name")
     for word in s.extra_args.split():
@@ -325,7 +325,7 @@ def validate(s: Settings) -> None:
         for unused in UNUSED_FLAGS:
             if unused.startswith(flag):
                 raise ConfigError(f"extra_args sets {word} ({unused}): not a GLM-on-one-Mac flag in this engine "
-                                  "(a pair's link, CUDA ranks, remote image URLs and tool-system are other recipes)")
+                                  "(a pair's link, CUDA ranks, images and tool-system are other recipes or engines)")
     for kv in s.extra_env_pairs:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", kv):
             raise ConfigError(f"extra_env entry {kv!r} is not KEY=VALUE")

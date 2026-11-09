@@ -1,0 +1,38 @@
+community-v1: code and chat, 2 temperatures, 5 repeats after warm-up.
+This generates model replies; use Ctrl-C to cancel. Nothing is uploaded unless you publish.
+The server gets up to 1571 s to load 182 GB of weights; --startup-timeout sets another limit.
+Chat thinking: off
+code T=1 warm-up: ok 119.94 delivery tok/s
+code T=1 repeat 1/5: ok 119.20 delivery tok/s
+code T=1 repeat 2/5: ok 105.07 delivery tok/s
+code T=1 repeat 3/5: ok 90.73 delivery tok/s
+code T=1 repeat 4/5: ok 159.83 delivery tok/s
+code T=1 repeat 5/5: ok 140.32 delivery tok/s
+chat T=1 warm-up: ok 81.51 delivery tok/s
+chat T=1 repeat 1/5: ok 82.58 delivery tok/s
+chat T=1 repeat 2/5: ok 92.95 delivery tok/s
+chat T=1 repeat 3/5: ok 83.09 delivery tok/s
+chat T=1 repeat 4/5: ok 59.43 delivery tok/s
+chat T=1 repeat 5/5: ok 86.72 delivery tok/s
+code T=0 warm-up: ok 106.96 delivery tok/s
+code T=0 repeat 1/5: ok 106.65 delivery tok/s
+code T=0 repeat 2/5: ok 107.25 delivery tok/s
+code T=0 repeat 3/5: ok 107.12 delivery tok/s
+code T=0 repeat 4/5: ok 107.39 delivery tok/s
+code T=0 repeat 5/5: ok 107.02 delivery tok/s
+chat T=0 warm-up: ok 87.71 delivery tok/s
+chat T=0 repeat 1/5: ok 88.08 delivery tok/s
+chat T=0 repeat 2/5: ok 88.18 delivery tok/s
+chat T=0 repeat 3/5: ok 87.68 delivery tok/s
+chat T=0 repeat 4/5: ok 86.80 delivery tok/s
+chat T=0 repeat 5/5: ok 88.45 delivery tok/s
+Run 8a71e6db-2e74-4544-ae3c-74c24a01dc18 | mlx | TensorFold/GLM-5.3-Flash-MLX-4bit-MTP
+Protocol community-v1; compare only within this protocol and manifest digest.
+Workload       Temp    Stream delivery tok/s    First text, s    Status
+code           1      119.20                    0.076            complete
+chat           1      83.09                     0.114            complete
+code           0      107.12                    0.077            complete
+chat           0      88.08                     0.114            complete
+Stream delivery includes transport buffering; it is not an engine token clock.
+Receipt saved: <run>/receipt.json
+Draft counts: 2862 of 4006 drafted tokens accepted over 2246 rounds (20 of 20 attempts reported them); saved: <run>/receipt.drafts.json

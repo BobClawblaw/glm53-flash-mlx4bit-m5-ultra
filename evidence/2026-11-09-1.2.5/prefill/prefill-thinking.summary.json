@@ -1,0 +1,41 @@
+{
+ "ok": null,
+ "summary": "2233 tokens 1972.6 tok/s (1.132 s), 8767 tokens 1986.2 tok/s (4.414 s), 34950 tokens 1696.4 tok/s (20.603 s), 139894 tokens 1730.9 tok/s (80.822 s)",
+ "metrics": {
+  "2048": {
+   "status": 200,
+   "prompt_tokens": 2233,
+   "cached_tokens": 0,
+   "ttft": 1.132,
+   "tok_s": 1972.6,
+   "error": ""
+  },
+  "8192": {
+   "status": 200,
+   "prompt_tokens": 8767,
+   "cached_tokens": 0,
+   "ttft": 4.414,
+   "tok_s": 1986.2,
+   "error": ""
+  },
+  "32768": {
+   "status": 200,
+   "prompt_tokens": 34950,
+   "cached_tokens": 0,
+   "ttft": 20.603,
+   "tok_s": 1696.4,
+   "error": ""
+  },
+  "131072": {
+   "status": 200,
+   "prompt_tokens": 139894,
+   "cached_tokens": 0,
+   "ttft": 80.822,
+   "tok_s": 1730.9,
+   "error": ""
+  }
+ },
+ "name": "prefill-thinking",
+ "type": "prefill",
+ "seconds": 107.3
+}

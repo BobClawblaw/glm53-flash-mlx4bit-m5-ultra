@@ -9,27 +9,13 @@ same_as = ""                              # other repositories whose snapshot at
 
 [engine]
 tensorfold_repo = "https://github.com/ashhart/TensorFold.git"
-tensorfold_sha = "bec00ae6961a43a9ab73c4fa9338c167b3f82851"     # v1.0.5
+tensorfold_sha = "8be9c408c2825102b475dc6049c6aa3cf5d9e910"     # v1.2.5, as released: no patch
 tensorfold_src = "~/github/TensorFold"   # a checkout holding the sha; `build` adds a worktree at it under tf_cache
-# applied to the worktree before the build. Pinned by sha256; never edit it in place, write a new one and re-pin.
-#  - with GLM_RESIDENCY the weights' residency set is requested before their reads, not after, and with GLM_WIRE every
-#    buffer is wired (mlock) before it fills: past ~110 GB of fresh buffers the GPU driver's wired collector otherwise
-#    hands the untouched ones to the compressor (145 GiB seen; with Time Machine's file cache beside it, jetsam then
-#    killed ~300 system daemons and the server);
-#  - --vision on the native engine: the checkpoint's image tower (families/glm/vision.zig, glm_vision.metal), image
-#    decoding and the processor (families/glm/image.zig), data-URL image_url parts expanded to each image's tokens
-#    (server/images.zig), the rows injected over the placeholders' embeddings in the prompt pass.
-#  - a request with a temperature is served greedily (the native GLM engine decodes greedily only), not failed:
-#    clients such as hermes always send one (stock 1.0.5 refuses it with a 400).
-#  - the streams share one MLA cache pool of the whole window (families/glm/slots.zig): a request takes prompt +
-#    max_tokens from it while it runs, admission waits when it does not fit, and a kept prompt state holds the blocks
-#    under its prefix after its stream leaves until a new request needs them.
-#  - with GLM_WIRE the weights' reads skip 1.0.5's wait for free memory (paced_read): the buffers are wired before
-#    the reads, so a read takes no free page, and with ~20 GB of other file cache on the Mac the kernel keeps free
-#    memory under that wait's 8 GB floor (a load sat 5 min at 200 GiB wired).
-# 1.0.5's own GLM_LOAD_LIMIT_GB carries the one-Mac load limit past 70% of RAM (the panic risk on its log).
-patch = "glm-one-mac-vision-pool-wiredreads-v1.0.5.patch"
-patch_sha256 = "706814e87963a911150cf5a3d2cb92c34f5b1ed6151db72f2fd083554dae87a9"
+# A patch applied to the worktree before the build, pinned by sha256 (never edit one in place: write a new one and
+# re-pin). Empty: the release as it is. The 1.0.5 line's patch (one-Mac vision tower, shared pool, wired reads) is
+# not carried: 1.2.5 pools the window and wires the model itself, serves any temperature, and has no GLM vision on Metal.
+patch = ""
+patch_sha256 = ""
 zig = "~/.local/zig/zig"                 # Zig 0.17.0 (.zig-version in the checkout)
 zig_cpu = "apple_m1"
 binary = ""                              # a prebuilt tensorfold-native to serve with instead of the pinned build
@@ -43,36 +29,39 @@ request_log = ""                         # a file for TENSORFOLD_REQUEST_LOG; em
 
 [serve]
 profile = "chat"                 # chat (MTP drafts) | reference (--no-drafts, the exactness reference)
-# the window: the checkpoint's full 1,048,576. The streams share one cache pool of this many tokens (the patch's
-# pooled MLA caches, 24.2 GB beside 180.6 GB of weights): one request alone can use all of it, several split it, each
-# taking its prompt plus max_tokens while it runs
+# the window: the checkpoint's full 1,048,576. The streams share the engine's cache pool of this many tokens: one
+# request alone can use all of it, several split it, each taking its prompt plus max_tokens while it runs
 context = 1048576
-parallel = 3                     # streams at once, sharing decode rounds and the pool (~0.3 GB of their own each)
-drafts = true
+parallel = 3                     # streams at once, sharing decode rounds and the pool
+drafts = true                    # the checkpoint's MTP head (loaded only inside memory_limit_gb: 180.6 GB with it)
 reasoning_effort = "high"        # GLM-5.3's levels: low, high, max; "" leaves the template's default, max
 thinking = true                  # GLM-5.3 reasons first (reasoning_content); a request can send chat_template_kwargs {"enable_thinking": false}
 max_tokens = 32768
-temperature = "0"                # the native GLM engine decodes greedily only: a request at the checkpoint's 1.0 is refused
+temperature = ""                 # the server's default for requests that send none: "" the checkpoint's (1.0, top_p 0.95); "0" greedy
 prompt_cache_gib = 4             # kept prompt states, bounded so the load stays predictable; -1 the engine's default, 0 off
-learn = false                    # shared prompt prefixes on disk (GLM has it since v1.0.4); learn_dir and learn_gib below
+learn = false                    # shared prompt prefixes on disk; learn_dir and learn_gib below
 learn_dir = ""                   # "" the engine's ~/.cache/tensorfold/learned
 learn_gib = 32
 keep_warm = 900
 compact_at = ""
 dashboard = true
-# image input (the patch's --vision): data:-URL image_url parts in user messages, decoded and run through the tower
-# natively; the tower takes ~0.9 GiB and its scratch ~1.2 GiB for vision_image_tokens (4096 tokens: 16,384 patches)
-vision = true
-vision_image_tokens = 4096       # the visual tokens a request's images share (each image at most this; "low" detail 256)
+# images: 1.2.5 has no --vision for GLM on Metal (an image_url part answers 400); the setting is refused when true
+vision = false
+vision_image_tokens = 4096
 vision_max_images = 4
 api_key = ""
 extra_args = ""
-extra_env = "GLM_WIRE=1"         # the model wired (mlock) before its reads, with no residency set (README, Steadiness)
-# memory: the engine refuses a one-Mac load past GLM_LOAD_LIMIT_GB (stock 1.0.5; unset: 70% of RAM). 215 GB holds
-# the 180.6 GB of weights, the 1M-token pool, three streams' own states and the kept prompt states; `up` also refuses when free memory is under the
-# engine's floor plus memory_margin_gib, and the watchdog below kills the server before the Mac swaps.
+extra_env = ""
+# memory: the engine refuses a one-Mac load past GLM_LOAD_LIMIT_GB (unset: 70% of RAM, 179.2 GB on 256, which drops
+# the 180.6 GB load with the MTP head). 215 GB holds the weights, the 1M-token pool, three streams' own states and the
+# kept prompt states (190.9 GiB wired at idle); `up` also refuses when free memory is under the engine's floor plus
+# memory_margin_gib, and the watchdog below kills the server before the Mac swaps.
 memory_limit_gb = 215
-residency = false                # GLM_RESIDENCY and GLM_WIRE; off: its weights-only set made 11-14 of 30 replies slow (README)
+residency = true                 # the engine's residency set over the weights (GLM_RESIDENCY=0 when false): kept wired between requests
+# macOS's GPU wired ceiling (sysctl iogpu.wired_limit_mb; 0 is the default, about 75% of RAM): under it the wired
+# collector evicts parts of the model mid-request and the same greedy reply swings between 7 and 107 tok/s, residency
+# set or not. `up` refuses when the sysctl is under this value and prints the command (it resets at reboot); 0 skips the check
+wired_limit_mb = 225000
 memory_margin_gib = 8
 memguard = true
 memguard_min_free_gib = 6        # free + inactive + speculative pages
